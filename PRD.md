@@ -142,6 +142,21 @@ What each kind of call does:
                                    the new decision grows from the older node
 ```
 
+Rules the code settled (step 2, `internal/tree`):
+
+- **Choices on the table stay at the bottom.** A decision with no pick yet
+  moves down to "you are here" each time the talk moves on. When it gets
+  picked, it grows from "you are here". So the tree reads in the order things
+  were decided, not the order they came up.
+- **A given-up branch stays given up.** An open decision under a dropped
+  branch is no longer listed as open. Picking a `✗` option again is refused:
+  "start a new decision". Going back to a decision that sits inside a dropped
+  branch is refused the same way.
+- On an update (`decision_id`), `question` is ignored. New options join as
+  "being weighed", or as "not picked" if the decision was already made.
+- Option labels match without caring about capital letters or extra spaces.
+- A bad call changes nothing. Its error message says what to do instead.
+
 What the tool sends back to Claude, in one short line:
 
 ```
@@ -149,8 +164,8 @@ Saved as d4. You are here: add a database index. Still open: none.
 ```
 
 **Locked nodes.** If Amir fixed a node by hand (section 9.3), a call that would
-change it fails with this message: "Amir fixed this node by hand. Leave it as
-it is." Claude sees the message and moves on.
+change it fails with this message: `The user fixed "add a cache" (n2) by hand.
+Leave it as it is.` Claude sees the message and moves on.
 
 ### 7.2 `show_decision_tree`
 
@@ -183,28 +198,47 @@ whether this one guard is enough. If it is not, section 12.1 lists what to add.
 
 One file per session: `~/.local/state/decision-tree/<session-id>.json`.
 
-A node:
+A node (an option, or the start node):
 
 ```json
 {
-  "id": "n7",
-  "decision": "d3",
-  "parent": "n3",
+  "id": "n3",
+  "decision": "d1",
   "label": "add a database index",
-  "state": "picked",
+  "state": "dropped",
   "reason": "fixes the slow query itself; a cache only helps repeat searches",
   "by": "both",
-  "at": "2026-09-29T15:02:11Z",
-  "locked": false
+  "at": "2026-09-29T15:40:02Z",
+  "drop_reason": "the index did not fix the slow query",
+  "locked": false,
+  "hidden": false
 }
 ```
 
+A decision, which holds its options and the node it grows from:
+
+```json
+{
+  "id": "d1",
+  "question": "Which fix for slow CRM search?",
+  "parent": "n0",
+  "options": ["n1", "n2", "n3"],
+  "at": "2026-09-29T15:01:40Z"
+}
+```
+
+The file also holds `here` (the "you are here" node id) and `fixes` (Amir's
+last 50 fixes, so `u` can undo them).
+
 - `state` is one of: `weighing`, `picked`, `not_picked`, `dropped`.
+- A dropped node keeps its `reason` (why it was picked) and gets a
+  `drop_reason` (why it was given up).
 - The top node, "start", gets its label from the session title in the chat
   file. If there is no title yet, it uses your first message, cut short.
 - Two programs write this file: the MCP server (Claude's calls) and the split
   (your fixes). Each one locks the file, reads it fresh, changes it, and saves
-  it. So neither one wipes out the other's change.
+  it. So neither one wipes out the other's change. A file that cannot be read
+  is left alone, never overwritten.
 - A node you delete stays in the file, hidden and locked. So Claude cannot add
   it back.
 
@@ -354,7 +388,7 @@ Done on 29 Sep 2026. The full write-up is in `docs/findings.md`.
 ## 14. Build order
 
 1. ~~Research (section 13). Write up the findings.~~ Done 29 Sep 2026.
-2. Tree file + tree logic, with tests.
+2. ~~Tree file + tree logic, with tests.~~ Done 29 Sep 2026: `internal/tree`, `internal/store`.
 3. MCP server + `print`. No split yet.
 4. **One week of real use.** Amir works as normal. At the end, pick 5
    sessions. For each one, Claude reads the chat file and lists the decisions
