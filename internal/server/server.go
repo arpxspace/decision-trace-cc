@@ -6,12 +6,15 @@ package server
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"decision-tree/internal/checkpoint"
 	"decision-tree/internal/claude"
 	"decision-tree/internal/render"
 	"decision-tree/internal/store"
@@ -72,6 +75,9 @@ type Server struct {
 	Caller func() (claude.Session, error) // which session is calling; asked on every call
 	Title  func(sessionID string) string  // names the start node of a new tree
 	Now    func() time.Time
+	// Checkpoint saves what a branch needs to start from a new pick (PRD
+	// 17.1). nil takes no checkpoints.
+	Checkpoint func(sess claude.Session, node, toolUseID string, at time.Time) tree.Checkpoint
 }
 
 // New makes a Server for real use.
@@ -89,6 +95,19 @@ func New() *Server {
 			return title
 		},
 		Now: time.Now,
+		Checkpoint: func(sess claude.Session, node, toolUseID string, at time.Time) tree.Checkpoint {
+			repo := sess.Cwd
+			if repo == "" {
+				repo, _ = os.Getwd()
+			}
+			// Claude's memory for the project sits next to the session's chat.
+			memory := ""
+			if chat, err := claude.ChatPath(dir, sess.ID); err == nil {
+				memory = filepath.Join(filepath.Dir(chat), "memory")
+			}
+			m := checkpoint.Maker{Dir: filepath.Join(store.Default().Dir, "checkpoints")}
+			return m.Take(repo, memory, sess.ID, node, toolUseID, at)
+		},
 	}
 }
 
@@ -107,7 +126,7 @@ func (s *Server) MCP(version string) *mcp.Server {
 	return m
 }
 
-func (s *Server) record(_ context.Context, _ *mcp.CallToolRequest, in RecordInput) (*mcp.CallToolResult, any, error) {
+func (s *Server) record(_ context.Context, req *mcp.CallToolRequest, in RecordInput) (*mcp.CallToolResult, any, error) {
 	if strings.TrimSpace(in.Picked) == "" {
 		// The schema already asks for it; this catches "picked": "".
 		return nil, nil, fmt.Errorf("picked is needed: only log a decision once one option has won. Do not log options that are only being discussed.")
@@ -116,6 +135,13 @@ func (s *Server) record(_ context.Context, _ *mcp.CallToolRequest, in RecordInpu
 	if err != nil {
 		return nil, nil, fmt.Errorf("decision-tree cannot tell which session this is: %v", err)
 	}
+	// Claude Code sends the id of this tool use with each call
+	// (docs/findings.md part 1). It later finds where to cut the chat.
+	var toolUseID string
+	if req != nil && req.Params != nil {
+		toolUseID, _ = req.Params.Meta["claudecode/toolUseId"].(string)
+	}
+	now := s.Now()
 	var res tree.Result
 	t, err := s.Store.Update(sess.ID, func(t *tree.Tree) error {
 		s.fill(t, sess)
@@ -123,8 +149,11 @@ func (s *Server) record(_ context.Context, _ *mcp.CallToolRequest, in RecordInpu
 		res, err = t.Record(tree.Call{
 			Topic: in.Topic, Options: in.Options, Picked: in.Picked,
 			Reason: in.Reason, By: in.By, DecisionID: in.DecisionID, DropLater: in.DropLater, After: in.After,
-			At: s.Now(),
+			At: now,
 		})
+		if err == nil && res.Picked != "" && s.Checkpoint != nil {
+			t.Node(res.Picked).Checkpoint = s.Checkpoint(sess, res.Picked, toolUseID, now)
+		}
 		return err
 	})
 	if err != nil {

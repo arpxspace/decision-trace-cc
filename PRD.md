@@ -654,6 +654,24 @@ Files that git ignores (`.env`, `node_modules`) are not in the snapshot.
 Files listed in the repo's `.worktreeinclude` (Claude Code's own convention)
 are copied into the branch's worktree.
 
+Built on 29 Sep 2026 (`internal/checkpoint`). What building it showed:
+
+- **Speed.** About 170 ms per decision on a repo with 20,000 files. The
+  snapshot starts from a copy of the real index, so git only re-reads files
+  that changed. It gives up after 20 seconds, and the checkpoint says why.
+- **Only new picks get one.** Picking the same option again (just a new
+  reason) is not a new moment to go back to.
+- **What sees the snapshots.** The normal `git log`, `git status`, `git
+  branch`, and `git push` do not. But views of every ref do: `git log --all`,
+  `gitk --all`, and lazygit's full graph show them as "decision-tree
+  checkpoint: …", the same way they show the stash. Git has no way to hide a
+  ref from `--all`.
+- **They pile up.** One hidden ref per decision stays until it is removed.
+  A cleanup command comes later (for example, drop checkpoints of sessions
+  older than 30 days).
+- It works with no commits yet, from a subfolder, and even when the repo
+  says to sign every commit (a snapshot never signs).
+
 ### 17.2 Making a branch
 
 ```
@@ -739,8 +757,8 @@ state unavailable. The current folder will be used." It never pretends.
 
 ### 17.7 Build order
 
-1. Save checkpoints at each decision: the tool-use id, the git snapshot, and
-   the memory copy. Tests with a scratch git repo.
+1. ~~Save checkpoints at each decision: the tool-use id, the git snapshot, and
+   the memory copy. Tests with a scratch git repo.~~ Done 29 Sep 2026.
 2. Find the cut point: from a tool-use id to the chat entry to cut at.
    Test on a real chat file.
 3. `decision-tree branch <session> <node>`, a plain command that does steps

@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"decision-tree/internal/store"
 )
 
 // TestEndToEnd runs the real binary as an MCP server over stdin/stdout, the
@@ -24,11 +26,33 @@ func TestEndToEnd(t *testing.T) {
 	}
 	cfg, state := filepath.Join(tmp, "claude"), filepath.Join(tmp, "state")
 	const sid = "8533417c-1b9d-4c3c-a771-f0df5b76dae2"
+	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+cfg, "XDG_STATE_HOME="+state, "CLAUDE_CODE_SESSION_ID=stale",
+		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+
+	// The session works in a git repo with uncommitted work, and Claude has
+	// a memory file for the project.
+	repo := filepath.Join(tmp, "crm")
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	os.MkdirAll(repo, 0o755)
+	git("init", "-q")
+	writeFile(t, filepath.Join(repo, "app.txt"), "v1\n")
+	git("add", ".")
+	git("commit", "-qm", "init")
+	writeFile(t, filepath.Join(repo, "app.txt"), "v2, not committed\n")
 	writeFile(t, filepath.Join(cfg, "sessions", strconv.Itoa(os.Getpid())+".json"),
-		`{"pid":1,"sessionId":"`+sid+`","cwd":"/w/crm","status":"idle"}`)
+		`{"pid":1,"sessionId":"`+sid+`","cwd":"`+repo+`","status":"idle"}`)
 	writeFile(t, filepath.Join(cfg, "projects", "-w-crm", sid+".jsonl"),
 		`{"type":"ai-title","aiTitle":"CRM search is slow","sessionId":"`+sid+`"}`+"\n")
-	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+cfg, "XDG_STATE_HOME="+state, "CLAUDE_CODE_SESSION_ID=stale")
+	writeFile(t, filepath.Join(cfg, "projects", "-w-crm", "memory", "MEMORY.md"), "- the user likes short answers\n")
 
 	cmd := exec.Command(bin, "mcp")
 	cmd.Env = env
@@ -41,7 +65,8 @@ func TestEndToEnd(t *testing.T) {
 	for _, args := range []map[string]any{
 		{"topic": "Fix", "options": []string{"add a cache", "add a database index"}, "picked": "add a database index", "reason": "fixes the query itself", "by": "both"},
 	} {
-		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "record_decision", Arguments: args})
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "record_decision", Arguments: args,
+			Meta: mcp.Meta{"claudecode/toolUseId": "toolu_e2e"}})
 		if err != nil || res.IsError {
 			t.Fatalf("record_decision(%v) = %+v, %v", args, res, err)
 		}
@@ -60,6 +85,28 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if out := runBin(t, bin, env, "list"); !strings.Contains(out, "8533417c  crm     1          CRM search is slow") {
 		t.Errorf("list:\n%s", out)
+	}
+
+	// The pick got a checkpoint: chat position, code, and memory (PRD 17.1).
+	tr, err := store.Store{Dir: filepath.Join(state, "decision-tree")}.Load(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cp := tr.Node("n2").Checkpoint
+	if cp.ToolUseID != "toolu_e2e" || cp.Commit == "" || cp.Missing != "" {
+		t.Fatalf("checkpoint = %+v", cp)
+	}
+	if got := git("rev-parse", "refs/decision-tree/checkpoints/"+sid+"/n2"); got != cp.Commit {
+		t.Fatalf("ref points at %s, checkpoint says %s", got, cp.Commit)
+	}
+	if got := git("show", cp.Commit+":app.txt"); got != "v2, not committed" {
+		t.Fatalf("snapshot has app.txt = %q", got)
+	}
+	if got := git("status", "--porcelain"); got != "M app.txt" {
+		t.Fatalf("the repo changed: status = %q", got)
+	}
+	if b, err := os.ReadFile(filepath.Join(cp.Memory, "MEMORY.md")); err != nil || string(b) != "- the user likes short answers\n" {
+		t.Fatalf("memory copy: %q, %v", b, err)
 	}
 }
 

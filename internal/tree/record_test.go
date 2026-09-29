@@ -210,6 +210,20 @@ func TestAddOptions(t *testing.T) {
     ○ d`)
 }
 
+func TestResultNamesTheNewPick(t *testing.T) {
+	tr := New("s1", t0)
+	if r := rec(t, tr, Call{Topic: "API", Options: []string{"REST", "GraphQL"}, Picked: "REST", Reason: "r", By: ByUser, At: at(1)}); r.Picked != "n1" {
+		t.Fatalf("new decision: picked = %q, want n1", r.Picked)
+	}
+	if r := rec(t, tr, Call{DecisionID: "d1", Picked: "GraphQL", Reason: "r", By: ByUser, At: at(2)}); r.Picked != "n2" {
+		t.Fatalf("changed pick: picked = %q, want n2", r.Picked)
+	}
+	// The same pick again (a new reason) is not a new moment to go back to.
+	if r := rec(t, tr, Call{DecisionID: "d1", Picked: "GraphQL", Reason: "better reason", By: ByUser, At: at(3)}); r.Picked != "" {
+		t.Fatalf("same pick: picked = %q, want none", r.Picked)
+	}
+}
+
 func TestSamePickAgainUpdatesReason(t *testing.T) {
 	tr := crm(t)
 	rec(t, tr, Call{DecisionID: "d2", Picked: "on company + date", Reason: "new reason", By: ByUser, At: at(9)})

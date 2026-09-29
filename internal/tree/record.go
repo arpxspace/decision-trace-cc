@@ -22,6 +22,7 @@ type Call struct {
 type Result struct {
 	DecisionID string
 	Here       string   // node id of "you are here"
+	Picked     string   // the option this call picked, if the pick is new or changed
 	Open       []string // decisions still being weighed on the live branch
 	Left       []string // open decisions this call left behind on a dropped branch
 	Skipped    []string // options left out because Amir deleted them
@@ -124,18 +125,23 @@ func (t *Tree) record(c Call) (Result, error) {
 		t.addOption(d, o, state, c.At)
 	}
 
+	var newPick string
 	if picked != "" {
 		x := t.optionByLabel(d, picked)
 		if x == nil {
 			return Result{}, errf("picked %q is not an option of %s. Add it to options.", picked, d.ID)
 		}
+		before := t.PickOf(d)
 		if err := t.pick(d, x, clean(c.Reason), c.By, c.At, false, c.DropLater); err != nil {
 			return Result{}, err
+		}
+		if x != before {
+			newPick = x.ID
 		}
 	}
 	t.float()
 
-	res := Result{DecisionID: d.ID, Here: t.Here, Skipped: skipped}
+	res := Result{DecisionID: d.ID, Here: t.Here, Picked: newPick, Skipped: skipped}
 	openNow := map[string]bool{}
 	for _, o := range t.Open() {
 		res.Open = append(res.Open, o.ID)

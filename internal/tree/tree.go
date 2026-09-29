@@ -43,6 +43,21 @@ type Node struct {
 	DropReason string    `json:"drop_reason,omitempty"`
 	Locked     bool      `json:"locked,omitempty"` // Amir fixed it; Record must not change it
 	Hidden     bool      `json:"hidden,omitempty"` // Amir deleted it
+
+	// Checkpoint is what a branch needs to start from the moment this
+	// option was picked (PRD 17.1). Package checkpoint fills it in.
+	Checkpoint Checkpoint `json:"checkpoint,omitzero"`
+}
+
+// Checkpoint is the state at the moment an option was picked.
+type Checkpoint struct {
+	ToolUseID string    `json:"tool_use_id,omitempty"` // the record_decision call: finds where to cut the chat
+	Repo      string    `json:"repo,omitempty"`        // the git repo's top folder
+	Commit    string    `json:"commit,omitempty"`      // snapshot of the working folder, uncommitted work included
+	Ref       string    `json:"ref,omitempty"`         // the hidden ref that keeps the snapshot
+	Memory    string    `json:"memory,omitempty"`      // copy of Claude's memory for the project
+	At        time.Time `json:"at,omitzero"`
+	Missing   string    `json:"missing,omitempty"` // what could not be saved, in plain words; "" = nothing
 }
 
 // Decision is what is being decided and its options. It grows from one node.

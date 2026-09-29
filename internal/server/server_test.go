@@ -336,3 +336,39 @@ func TestUnknownSession(t *testing.T) {
 		t.Fatalf("got %q (error: %v)", got, isErr)
 	}
 }
+
+// PRD 17.1: every new pick gets a checkpoint, with the tool-use id Claude
+// Code sends in _meta. The same pick again (only a new reason) does not.
+func TestCheckpointOnNewPicks(t *testing.T) {
+	f, cs := newFake(t)
+	var calls []string
+	f.srv.Checkpoint = func(sess claude.Session, node, toolUseID string, at time.Time) tree.Checkpoint {
+		calls = append(calls, sess.ID+" "+node+" "+toolUseID)
+		return tree.Checkpoint{ToolUseID: toolUseID, Commit: "abc123", At: at}
+	}
+	record := func(id string, args map[string]any) {
+		t.Helper()
+		res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "record_decision", Arguments: args, Meta: mcp.Meta{"claudecode/toolUseId": id},
+		})
+		if err != nil || res.IsError {
+			t.Fatalf("record_decision(%v) = %+v, %v", args, res, err)
+		}
+	}
+	record("toolu_1", map[string]any{"topic": "API", "options": []string{"REST", "GraphQL"}, "picked": "REST", "reason": "simple", "by": "both"})
+	record("toolu_2", map[string]any{"decision_id": "d1", "picked": "GraphQL", "reason": "flexible queries", "by": "user"})
+	record("toolu_3", map[string]any{"decision_id": "d1", "picked": "GraphQL", "reason": "a better reason", "by": "user"})
+
+	if want := []string{"s1 n1 toolu_1", "s1 n2 toolu_2"}; !slices.Equal(calls, want) {
+		t.Fatalf("checkpoints taken: %v, want %v", calls, want)
+	}
+	tr, err := f.srv.Store.Load("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"n1": "toolu_1", "n2": "toolu_2"} {
+		if cp := tr.Node(id).Checkpoint; cp.ToolUseID != want || cp.Commit != "abc123" {
+			t.Fatalf("%s checkpoint = %+v", id, cp)
+		}
+	}
+}
