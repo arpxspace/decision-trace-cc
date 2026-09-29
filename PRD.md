@@ -544,6 +544,7 @@ Done on 29 Sep 2026. The full write-up is in `docs/findings.md`.
    added: sideways scrolling and a wrapping details panel.
 6. Fixes and locks.
 7. Past trees (`o`), install, the tmux key.
+8. Branch from a decision (section 17). Research done 29 Sep 2026.
 
 Step 4 is the real test. If Claude does not log good decisions, the screen
 does not matter.
@@ -626,3 +627,124 @@ change this to GraphQL."
 an in-memory cache are all possible." No node. The tool refuses a call with
 no pick, and in the live run Claude made no call at all.
 
+
+## 17. Branch from a decision (draft, not built)
+
+Asked for by Amir on 29 Sep 2026 ("Branchable Decision Checkpoints"). A
+decision node becomes a checkpoint you can go back to: pick an old decision,
+press `b`, and a new Claude session starts from that point, in a new tmux
+pane, with its own copy of the code. **The original session and its files are
+never changed.**
+
+The research is in `docs/findings.md`, part 9. Claude Code can already do the
+hard part: fork a session at a given message.
+
+### 17.1 What is saved at each decision
+
+When Claude calls `record_decision`, the MCP server also saves a checkpoint
+on the node:
+
+| Part | How | If it can't |
+|------|-----|-------------|
+| Where in the chat | The call's `claudecode/toolUseId`. At branch time it points to the chat entry where the decision was logged. That is the cut point. | Branching is not offered |
+| The code | A git snapshot of the working folder, with uncommitted and new files, under a hidden ref `refs/decision-tree/checkpoints/<session>/<node>`. Your branch, staging area, stash, and log are untouched (tested). | Not a git repo, or the snapshot fails: "code checkpoint: not available" |
+| Claude's memory | A copy of the project's memory folder (`~/.claude/projects/<project>/memory/`) as it is at that moment, in `~/.local/state/decision-tree/checkpoints/<session>/<node>/memory/`. These are a few small text files. | No memory folder: the branch starts with none |
+
+Files that git ignores (`.env`, `node_modules`) are not in the snapshot.
+Files listed in the repo's `.worktreeinclude` (Claude Code's own convention)
+are copied into the branch's worktree.
+
+### 17.2 Making a branch
+
+```
+ you press b on a decision
+        │
+        ▼
+ ┌──────────────────────────────────────────────┐
+ │ Branch from:  API framework: FastAPI · 14:32  │
+ │ Session 582f6336                              │
+ │ Chat checkpoint: available                    │
+ │ Code checkpoint: available                    │
+ │ Name: api-framework-fastapi                   │
+ │ Create branch? [y/n]                          │
+ └──────────────────────────────────────────────┘
+        │ y
+        ▼
+ 1. git worktree add --detach <worktree> <snapshot>    (the code, as it was)
+      worktree = ~/.local/state/decision-tree/worktrees/<project>/<name>
+      then copy the files listed in .worktreeinclude
+ 2. copy the saved memory into the worktree's own     (the memory, as it was)
+      memory folder in ~/.claude/projects/
+ 3. claude -p --resume A --fork-session                (the chat, as it was:
+      --resume-session-at <cut> --session-id B            a new session B,
+      "This session branches from … Reply: ready."         A is not touched)
+ 4. tmux new-window in the parent's tmux session,
+      in the worktree, named <name>, running
+      claude --resume B -n <name>
+ 5. focus the new window
+```
+
+Why its own folder: Claude's memory belongs to a folder, not to a session
+(`docs/findings.md` part 9). A worktree inside the repo would share the
+original's memory, including things saved after the branch point. A separate
+folder, with the memory copied as it was at the decision, keeps the branch
+honest: it knows what the original knew at that moment, and nothing later.
+
+If the code checkpoint is missing, the dialog says so plainly: "Exact code
+state unavailable. The current folder will be used." It never pretends.
+
+### 17.3 The trees
+
+- The branch's tree starts as a copy of the parent's tree up to the branch
+  point. New decisions grow from there. Changing the branch-point decision
+  ("Use Flask instead") is an ordinary change in place, in the branch's own
+  copy.
+- The parent's tree shows each branch as a stub at the node it came from:
+
+```
+ ●  API framework: FastAPI
+ │
+ ├─⎇  api-framework-fastapi · 1 decision      ← a branch, in session B
+ ●  Cache: Redis  ◀
+```
+
+- The branch's tree file records where it came from: parent session, parent
+  node and decision, cut message, snapshot, worktree, name, and time. The
+  details panel shows it ("Branched from 'FastAPI' in session 582f6336 at 14:32").
+
+### 17.4 Keys
+
+| Key | Does |
+|-----|------|
+| `enter` | Show the source: the chat around the decision (Esc to close). Folding moves to `space` only. |
+| `b` | Branch from this decision (asks first) |
+| `B` | Branch, then jump to the new Claude pane |
+| `p` | In a branch: show the parent session's tree |
+| `[` `]` | Previous / next sibling branch (later) |
+
+### 17.5 Not in the first version
+
+- Rewinding the current session in place (spec section 23): branching only.
+- `[` / `]` between sibling branches.
+- Changes to claude-sidebar. Branches already show there by name, because
+  `-n` sets the session's name.
+
+### 17.6 Decided on 29 Sep 2026
+
+| Question | Amir's choice |
+|----------|---------------|
+| Where a branch's code lives | Its own folder, `~/.local/state/decision-tree/worktrees/<project>/<name>`, plus the project's memory as it was at the decision |
+| Where the new Claude session opens | A new window in the same tmux session as the original |
+| The branch symbol | `⎇` |
+
+### 17.7 Build order
+
+1. Save checkpoints at each decision: the tool-use id, the git snapshot, and
+   the memory copy. Tests with a scratch git repo.
+2. Find the cut point: from a tool-use id to the chat entry to cut at.
+   Test on a real chat file.
+3. `decision-tree branch <session> <node>`, a plain command that does steps
+   1 to 5 of 17.2. First live test: Amir's acceptance test (spec section 26,
+   FastAPI → "Use Flask instead").
+4. The view: `⎇` stubs, provenance in the details panel, and the keys `b`,
+   `B`, `enter`, `p`.

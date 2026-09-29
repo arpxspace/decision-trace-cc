@@ -195,6 +195,60 @@ What this shows:
 - Topics came out a little long ("Todo app API framework"), because every
   prompt said "todo app". Worth watching during the week of real use.
 
+## 9. Branching a session from a decision
+
+Amir's branch spec (PRD section 17) says to first find out whether Claude
+Code can resume or fork a session from an earlier message. Tested on
+29 Sep 2026, Claude Code 2.1.284, with Haiku, no MCP servers, and scratch
+folders.
+
+**Answer: yes, natively.** Hidden flags (not in `--help`) do it:
+
+| Flag | Claude Code's own description |
+|------|-------------------------------|
+| `--resume-session-at <message id>` | "When resuming, only messages up to and including the chain entry with <message.id> … (use with --resume in print mode)". It is "Ignored outside print mode". |
+| `--resume-drops-turn <message id>` | A safety check for the above: the resume is refused if the part being dropped holds anything from another turn. |
+| `--rewind-files <user message id>` | "Restore files to state at the specified user message and exit". It changes files **in place**, so it would change the original folder. Not used. |
+
+Public flags that help: `--fork-session` (resume under a new id),
+`--session-id <uuid>` (choose that id), `-n/--name` (a display name), and
+`-w/--worktree`.
+
+**What was tested:**
+
+1. Session A had three messages: "blue", "cat", "Oslo". Then:
+   `claude -p --resume A --fork-session --resume-session-at <the reply to "blue"> --session-id B "…"`.
+   B quoted back only the "blue" message. A was untouched (100 lines before
+   and after). B got the id that was chosen for it.
+2. The same fork, run from a different folder, found A by its id. The
+   branch was saved under the **new** folder's project folder.
+3. `claude --resume C -n branch-blue`, interactive, in that folder: it knew
+   only "blue". The name showed in the prompt box and in the session file
+   (`"name": "branch-blue", "nameSource": "user"`), which claude-sidebar reads.
+4. A worktree at `<repo>/.claude/worktrees/br` (Claude Code's own spot for
+   worktrees): the branch was saved in its own project folder, **but it read
+   the main repo's memory folder**. A worktree anywhere else gets its own,
+   empty memory.
+5. A git snapshot made with a temporary index (`read-tree HEAD`, `add -A`,
+   `write-tree`, `commit-tree`, kept under `refs/decision-tree/checkpoints/…`)
+   held an uncommitted edit, a new untracked file, and a staged file. `git
+   status`, the stash, HEAD, and the branch were all unchanged. A worktree made
+   from the snapshot had exactly those files.
+
+**What it means for the build:**
+
+- A branch takes two steps: a print-mode fork (one short model reply), then
+  `claude --resume <new id>` in a new tmux pane.
+- **Memory is per project folder, not per session.** In the test, the original
+  session saved "blue, cat, Oslo" to memory. A branch that shares that memory
+  folder would know "cat" and "Oslo", which break the rule that a branch acts
+  as if later decisions never happened.
+- Files ignored by git (`.env`, `node_modules`) are not in a snapshot. Claude
+  Code copies files listed in a `.worktreeinclude` file into its worktrees.
+- The first start in a new folder may ask to trust the folder.
+- Each `record_decision` call carries `claudecode/toolUseId` (part 1). That
+  finds the chat entry where the decision was logged: the cut point.
+
 ## Side effects of the test
 
 - `git init` made this folder its own git project. Claude Code then asked
