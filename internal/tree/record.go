@@ -22,6 +22,7 @@ type Result struct {
 	DecisionID string
 	Here       string   // node id of "you are here"
 	Open       []string // decisions still being weighed on the live branch
+	Left       []string // open decisions this call left behind on a dropped branch
 	Skipped    []string // options left out because Amir deleted them
 }
 
@@ -50,6 +51,7 @@ func (t *Tree) Record(c Call) (Result, error) {
 }
 
 func (t *Tree) record(c Call) (Result, error) {
+	openBefore := t.Open()
 	var opts []string
 	for _, o := range c.Options {
 		if o = clean(o); o != "" {
@@ -133,8 +135,17 @@ func (t *Tree) record(c Call) (Result, error) {
 	t.float()
 
 	res := Result{DecisionID: d.ID, Here: t.Here, Skipped: skipped}
+	openNow := map[string]bool{}
 	for _, o := range t.Open() {
 		res.Open = append(res.Open, o.ID)
+		openNow[o.ID] = true
+	}
+	// Still open, but no longer on the live branch: going back left it
+	// behind. Claude should hear about it, or it may ask the question again.
+	for _, o := range openBefore {
+		if !openNow[o.ID] && t.IsOpen(o) {
+			res.Left = append(res.Left, o.ID)
+		}
 	}
 	return res, nil
 }

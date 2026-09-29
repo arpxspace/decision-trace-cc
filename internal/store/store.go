@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -89,6 +91,61 @@ func (s Store) Update(sessionID string, fn func(*tree.Tree) error) (*tree.Tree, 
 		return nil, err
 	}
 	return t, write(path, t)
+}
+
+// Info is one saved tree.
+type Info struct {
+	SessionID string
+	Updated   time.Time
+}
+
+// List returns the saved trees, newest first.
+func (s Store) List() ([]Info, error) {
+	entries, err := os.ReadDir(s.Dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var list []Info
+	for _, e := range entries {
+		id, ok := strings.CutSuffix(e.Name(), ".json")
+		if !ok || !validID.MatchString(id) {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		list = append(list, Info{SessionID: id, Updated: fi.ModTime()})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Updated.After(list[j].Updated) })
+	return list, nil
+}
+
+// Find turns a session id, or the start of one, into a saved tree's id.
+// "" means the newest tree.
+func (s Store) Find(prefix string) (string, error) {
+	list, err := s.List()
+	if err != nil {
+		return "", err
+	}
+	var found []string
+	for _, in := range list {
+		if strings.HasPrefix(in.SessionID, prefix) {
+			found = append(found, in.SessionID)
+		}
+	}
+	switch {
+	case len(found) == 0 && prefix == "":
+		return "", errors.New("no trees saved yet")
+	case len(found) == 0:
+		return "", fmt.Errorf("no tree for session %q", prefix)
+	case len(found) > 1 && prefix != "":
+		return "", fmt.Errorf("%q matches %d sessions; give more of the id", prefix, len(found))
+	}
+	return found[0], nil
 }
 
 func decode(path string, b []byte) (*tree.Tree, error) {

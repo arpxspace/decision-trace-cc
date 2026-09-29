@@ -84,6 +84,42 @@ func TestBrokenFileIsLeftAlone(t *testing.T) {
 	}
 }
 
+func TestListAndFind(t *testing.T) {
+	s := Store{t.TempDir()}
+	if _, err := s.Find(""); err == nil || !strings.Contains(err.Error(), "no trees saved yet") {
+		t.Fatalf("find with no trees = %v", err)
+	}
+	for _, sid := range []string{"aaaa1111", "aaaa2222", "bbbb3333"} {
+		if _, err := s.Update(sid, addDecision("Q")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Make bbbb the oldest, so the newest is predictable.
+	path, _ := s.Path("bbbb3333")
+	old := time.Now().Add(-time.Hour)
+	os.Chtimes(path, old, old)
+
+	list, err := s.List()
+	if err != nil || len(list) != 3 || list[2].SessionID != "bbbb3333" {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+	cases := map[string]string{"bbbb": "bbbb3333", "aaaa1": "aaaa1111", "aaaa2222": "aaaa2222"}
+	for prefix, want := range cases {
+		if got, err := s.Find(prefix); err != nil || got != want {
+			t.Errorf("Find(%q) = %q, %v; want %q", prefix, got, err, want)
+		}
+	}
+	if got, err := s.Find(""); err != nil || got == "bbbb3333" {
+		t.Errorf("Find(\"\") = %q, %v; want one of the newer trees", got, err)
+	}
+	if _, err := s.Find("aaaa"); err == nil || !strings.Contains(err.Error(), "matches 2 sessions") {
+		t.Errorf("Find(\"aaaa\") = %v, want a 'matches 2' error", err)
+	}
+	if _, err := s.Find("zzz"); err == nil {
+		t.Error("Find(\"zzz\") found something")
+	}
+}
+
 func TestManyWritersAtOnce(t *testing.T) {
 	s := Store{t.TempDir()}
 	const n = 30

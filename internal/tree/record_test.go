@@ -106,8 +106,8 @@ func TestOpenDecisionsFloatDown(t *testing.T) {
 	tr := New("s1", t0)
 	rec(t, tr, Call{Question: "When to deploy?", Options: []string{"tonight", "now"}, At: at(1)})
 	r := rec(t, tr, Call{Question: "Which database?", Options: []string{"Postgres", "SQLite"}, Picked: "Postgres", Reason: "we need many writers", By: ByUser, At: at(2)})
-	if !slices.Equal(r.Open, []string{"d1"}) {
-		t.Fatalf("open = %v, want [d1]", r.Open)
+	if !slices.Equal(r.Open, []string{"d1"}) || len(r.Left) != 0 {
+		t.Fatalf("open = %v, left = %v; want [d1] open, none left (floating down is not being left behind)", r.Open, r.Left)
 	}
 	// d1 is still on the table, so it moves down under the new pick.
 	want(t, tr, `
@@ -134,9 +134,10 @@ func TestStrandedOpenDecision(t *testing.T) {
 	rec(t, tr, Call{Question: "Q1", Options: []string{"A", "B"}, Picked: "A", Reason: "r", By: ByUser, At: at(1)})
 	rec(t, tr, Call{Question: "Q2", Options: []string{"x", "y"}, At: at(2)})
 	r := rec(t, tr, Call{DecisionID: "d1", Picked: "B", Reason: "A failed", By: ByUser, At: at(3)})
-	// Q2 was asked under A. A was given up, so Q2 is no longer open.
-	if len(r.Open) != 0 {
-		t.Fatalf("open = %v, want none", r.Open)
+	// Q2 was asked under A. A was given up, so Q2 is no longer open on the
+	// live branch, and Claude is told it was left behind.
+	if len(r.Open) != 0 || !slices.Equal(r.Left, []string{"d2"}) {
+		t.Fatalf("open = %v, left = %v; want none open, d2 left", r.Open, r.Left)
 	}
 	// Answering it anyway brings it to "you are here".
 	rec(t, tr, Call{DecisionID: "d2", Picked: "x", Reason: "r", By: ByUser, At: at(4)})

@@ -119,10 +119,57 @@ With more than one client, take the one with the newest `client_activity`
 `internal/tmux/tmux.go`. Then match the pane id to the `tmux` field in the
 session files (`"probe:@0.%0"`: the part after `.` is the pane id).
 
+## 7. Live test of the real tool (build step 3)
+
+On 29 Sep 2026 the real `decision-tree mcp` ran in a real Claude session
+(Opus 5.5, private tmux server, trees saved to a scratch folder). The prompts
+never mentioned the tool. Three turns about a habit-tracker app:
+
+1. "SQLite or Postgres? Lay out the options."
+2. "Go with SQLite. Next: server-rendered HTML or React? Also, call the main
+   table habit_logs."
+3. "Change of plan: host on Vercel, so switch to Postgres. Front end:
+   server-rendered HTML plus htmx."
+
+**Run 1** found two problems:
+
+- Going back left the open front-end question (d2) under the dropped SQLite
+  branch. The tool's reply said "Still open: none", so Claude thought d2 was
+  gone and logged the same question again as d4. The tree had a duplicate.
+- Claude told the user about the tree in every reply ("I added this choice
+  to the decision tree…").
+
+Fixes: the reply now names questions left behind ("Left behind on the
+dropped branch, still unanswered: d2 … answer it with its decision_id … Do
+not log it again"), and the rules say "Log quietly".
+
+**Run 2**, same three turns, after the fixes:
+
+```
+● SQLite vs Postgres for habit tracker
+  Habit tracker: which database?
+    ✗ SQLite — dropped: Hosting on Vercel wipes the disk; use Neon free plan
+    ● Postgres — Hosting on Vercel wipes the disk; use Neon free plan (user)
+      Habit tracker: front end style?
+        ○ Server-rendered HTML
+        ○ React single-page app
+        ● Server-rendered HTML + htmx ◀ — Less work for one user; htmx gives instant row updates (user)
+```
+
+- Every choice was logged without being asked: options first, then the pick.
+- The table name `habit_logs` was not logged, which is right.
+- After going back, Claude answered d2 by its id and added the new option.
+  No duplicate.
+- Replies mentioned the tree 0 times.
+- One difference between runs: run 1 also logged "where to host? → Vercel";
+  run 2 did not. Both are fair calls. The week of real use will show how
+  much this kind of thing varies.
+
 ## Side effects of the test
 
 - `git init` made this folder its own git project. Claude Code then asked
   again whether to trust the folder. The test answered "yes".
-- The test left two short chats in this folder's history (`7ef62275…` and
-  `8533417c…`), plus their folders. All were deleted after the test.
+- The tests left short chats in this folder's history (`7ef62275…`,
+  `8533417c…`, and the two live runs `7a089a1a…`, `648794e1…`), plus their
+  folders. All were deleted after the tests.
 - The probe code lives in the session scratchpad, not in this project.

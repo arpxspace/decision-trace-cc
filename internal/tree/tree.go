@@ -59,7 +59,8 @@ type Decision struct {
 type Tree struct {
 	Version   int         `json:"version"`
 	SessionID string      `json:"session_id"`
-	Here      string      `json:"here"` // "you are here": the newest pick on the live branch
+	Folder    string      `json:"folder,omitempty"` // where the session runs
+	Here      string      `json:"here"`             // "you are here": the newest pick on the live branch
 	Nodes     []*Node     `json:"nodes"`
 	Decisions []*Decision `json:"decisions"`
 	Fixes     []Change    `json:"fixes,omitempty"` // Amir's fixes, newest last, for Undo

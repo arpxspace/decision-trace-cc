@@ -112,6 +112,12 @@ it again when one gets picked. It does not log each turn.
 **When unsure, leave it out.** A tree with a missing node is easier to fix
 than a tree full of small stuff.
 
+**Log quietly.** Claude does not mention the tree in its replies unless
+asked. (Without this rule, the live test showed Claude saying "I added this
+to the decision tree" in every reply.)
+
+The exact wording Claude sees is `Instructions` in `internal/server/server.go`.
+
 ## 7. The tools
 
 ### 7.1 `record_decision`
@@ -160,7 +166,17 @@ Rules the code settled (step 2, `internal/tree`):
 What the tool sends back to Claude, in one short line:
 
 ```
-Saved as d4. You are here: add a database index. Still open: none.
+Saved as d4. You are here: add a database index (n3). Still open: none.
+```
+
+When going back leaves an unanswered question on the dropped branch, the
+reply names it, so Claude answers it instead of asking it again (found in
+the live test, `docs/findings.md` part 7):
+
+```
+... Left behind on the dropped branch, still unanswered: d2 "Which front end?".
+If one still matters, answer it with its decision_id (add new options if
+needed) and it moves here. Do not log it again as a new decision.
 ```
 
 **Locked nodes.** If Amir fixed a node by hand (section 9.3), a call that would
@@ -311,10 +327,14 @@ Every fix locks the node (section 8).
 | `mcp` | Claude Code, once per session | The MCP server with the two tools |
 | `start` | You | Opens the split |
 | `toggle` | The tmux key | Opens or closes the split |
-| `print <session>` | You | Prints a tree as plain text (for testing) |
+| `print [session]` | You | Prints a tree as plain text, with reasons. No session = the newest tree. The first few characters of the id are enough, like a git hash. `--ids` adds ids. |
+| `list` | You | Lists saved trees, newest first: when, session, folder, how many decisions, start label |
 
 - Same screen libraries as claude-sidebar: Bubble Tea and Lip Gloss.
-  The MCP server uses the official MCP library for Go.
+  The MCP server uses the official MCP library for Go
+  (`github.com/modelcontextprotocol/go-sdk`, v1.8.0).
+- Each tool also carries `_meta: {"anthropic/alwaysLoad": true}`, so it
+  stays loaded even if the server's settings forget `alwaysLoad`.
 - Reuse claude-sidebar's code for tmux, the session files, and the iTerm2 split.
   Copy it for now, and share it later if both tools grow.
 - Install to `~/.local/bin/decision-tree`.
@@ -389,7 +409,8 @@ Done on 29 Sep 2026. The full write-up is in `docs/findings.md`.
 
 1. ~~Research (section 13). Write up the findings.~~ Done 29 Sep 2026.
 2. ~~Tree file + tree logic, with tests.~~ Done 29 Sep 2026: `internal/tree`, `internal/store`.
-3. MCP server + `print`. No split yet.
+3. ~~MCP server + `print`. No split yet.~~ Done 29 Sep 2026, with `list` and a
+   live test in real Claude (`docs/findings.md`, part 7).
 4. **One week of real use.** Amir works as normal. At the end, pick 5
    sessions. For each one, Claude reads the chat file and lists the decisions
    it finds there. Compare that list with the tree from `print`:
