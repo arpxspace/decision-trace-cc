@@ -76,8 +76,8 @@ type Server struct {
 	Title  func(sessionID string) string  // names the start node of a new tree
 	Now    func() time.Time
 	// Checkpoint saves what a branch needs to start from a new pick (PRD
-	// 17.1). nil takes no checkpoints.
-	Checkpoint func(sess claude.Session, node, toolUseID string, at time.Time) tree.Checkpoint
+	// 17.1) and puts it on the node. nil takes no checkpoints.
+	Checkpoint func(sess claude.Session, t *tree.Tree, node, toolUseID string, at time.Time)
 }
 
 // New makes a Server for real use.
@@ -95,7 +95,7 @@ func New() *Server {
 			return title
 		},
 		Now: time.Now,
-		Checkpoint: func(sess claude.Session, node, toolUseID string, at time.Time) tree.Checkpoint {
+		Checkpoint: func(sess claude.Session, t *tree.Tree, node, toolUseID string, at time.Time) {
 			repo := sess.Cwd
 			if repo == "" {
 				repo, _ = os.Getwd()
@@ -106,7 +106,17 @@ func New() *Server {
 				memory = filepath.Join(filepath.Dir(chat), "memory")
 			}
 			m := checkpoint.Maker{Dir: filepath.Join(store.Default().Dir, "checkpoints")}
-			return m.Take(repo, memory, sess.ID, node, toolUseID, at)
+			cp := m.Take(repo, memory, sess.ID, node, toolUseID, at)
+			n := t.Node(node)
+			n.Checkpoint = cp
+			// The copy of the tree includes this checkpoint, so a branch of a
+			// branch can find it.
+			if path, err := checkpoint.SaveTree(m.Dir, sess.ID, node, t); err == nil {
+				cp.Tree = path
+			} else {
+				cp.Missing = strings.TrimPrefix(cp.Missing+"; tree not saved: "+err.Error(), "; ")
+			}
+			n.Checkpoint = cp
 		},
 	}
 }
@@ -152,7 +162,7 @@ func (s *Server) record(_ context.Context, req *mcp.CallToolRequest, in RecordIn
 			At: now,
 		})
 		if err == nil && res.Picked != "" && s.Checkpoint != nil {
-			t.Node(res.Picked).Checkpoint = s.Checkpoint(sess, res.Picked, toolUseID, now)
+			s.Checkpoint(sess, t, res.Picked, toolUseID, now)
 		}
 		return err
 	})

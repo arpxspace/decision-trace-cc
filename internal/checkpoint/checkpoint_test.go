@@ -2,6 +2,7 @@ package checkpoint
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"decision-tree/internal/tree"
 )
 
 // isolate keeps the user's own git settings out of the tests.
@@ -212,5 +215,22 @@ func TestNoToolUseID(t *testing.T) {
 	cp := Maker{Dir: t.TempDir()}.Take(newRepo(t), "", "s1", "n1", "", time.Now())
 	if !strings.Contains(cp.Missing, "chat position unknown") || cp.Commit == "" {
 		t.Fatalf("checkpoint = %+v", cp)
+	}
+}
+
+func TestSaveTree(t *testing.T) {
+	tr := tree.New("s1", time.Now())
+	if _, err := tr.Record(tree.Call{Topic: "API", Options: []string{"REST"}, Picked: "REST", Reason: "r", By: tree.ByUser}); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path, err := SaveTree(dir, "s1", "n1", tr)
+	if err != nil || path != filepath.Join(dir, "s1", "n1", "tree.json") {
+		t.Fatalf("path %q, err %v", path, err)
+	}
+	b, _ := os.ReadFile(path)
+	var back tree.Tree
+	if err := json.Unmarshal(b, &back); err != nil || back.Here != "n1" || back.Node("n1").Label != "REST" {
+		t.Fatalf("saved tree = %+v, %v", back, err)
 	}
 }

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"decision-tree/internal/branch"
 	"decision-tree/internal/claude"
 	"decision-tree/internal/graph"
 	"decision-tree/internal/render"
@@ -41,6 +43,13 @@ Usage:
   decision-tree source <session> [node]
                                   where each pick came from in the chat, and
                                   its checkpoint (one node, or every pick)
+  decision-tree branch <session> <node> [--name N] [--focus] [--yes]
+                                  start a new Claude session from a decision,
+                                  with the chat, code, and memory as they were
+                                  then (node ids: see source). The original is
+                                  never changed.
+        --claude <path>           the claude program to run
+        --tmux-socket <name>      a tmux server other than the default
   decision-tree mcp               run the MCP server (Claude Code starts this)
   decision-tree version
 `
@@ -64,6 +73,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = list(store.Default(), stdout)
 	case "source":
 		err = source(store.Default(), claude.Dir(), args[1:], stdout)
+	case "branch":
+		err = branchCmd(args[1:], os.Stdin, stdout)
 	case "version":
 		fmt.Fprintln(stdout, version)
 	case "help", "-h", "--help":
@@ -134,6 +145,78 @@ func printTree(s store.Store, args []string, w io.Writer) error {
 	}
 	if len(why) > 0 {
 		fmt.Fprintf(w, "\nWhy\n%s\n", strings.Join(why, "\n"))
+	}
+	return nil
+}
+
+// branchCmd makes a branch from a decision (PRD 17.2), after showing what
+// it will start with and asking.
+func branchCmd(args []string, in io.Reader, w io.Writer) error {
+	st := store.Default()
+	d := branch.Deps{
+		Store: st, ClaudeDir: claude.Dir(), Tmux: tmux.Tmux{Bin: tmux.FindBin()},
+		Worktrees: filepath.Join(st.Dir, "worktrees"), Now: time.Now,
+	}
+	var pos []string
+	var name string
+	var focus, yes bool
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; a {
+		case "--focus":
+			focus = true
+		case "--yes", "-y":
+			yes = true
+		case "--name", "--claude", "--tmux-socket":
+			if i+1 >= len(args) {
+				return fmt.Errorf("%s needs a value", a)
+			}
+			i++
+			switch a {
+			case "--name":
+				name = branch.Slug(args[i])
+			case "--claude":
+				d.Claude = args[i]
+			case "--tmux-socket":
+				d.Tmux.Socket = args[i]
+			}
+		default:
+			pos = append(pos, a)
+		}
+	}
+	if len(pos) != 2 {
+		return fmt.Errorf("usage: decision-tree branch <session> <node> [--name N] [--focus] [--yes]")
+	}
+	p, err := branch.Prepare(d, pos[0], pos[1], name)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w, p.Summary())
+	if !yes {
+		fmt.Fprint(w, "\nCreate branch? [y/N] ")
+		answer, _ := bufio.NewReader(in).ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+			fmt.Fprintln(w, "No branch made.")
+			return nil
+		}
+	}
+	fmt.Fprintln(w, "\nMaking the branch (the chat fork takes a few seconds)…")
+	res, err := branch.Create(context.Background(), d, p, focus)
+	if err != nil {
+		if res.Command != "" {
+			fmt.Fprintf(w, "To start it yourself:\n  %s\n", res.Command)
+		}
+		return err
+	}
+	fmt.Fprintf(w, "\nCreated branch: %s\nSession: %s\nFolder: %s\n", p.Name, p.Session, p.Dir)
+	if len(res.Copied) > 0 {
+		fmt.Fprintf(w, "Copied from .worktreeinclude: %s\n", strings.Join(res.Copied, ", "))
+	}
+	switch {
+	case res.Pane != "":
+		fmt.Fprintf(w, "tmux: a new window named %s (pane %s)\n", p.Name, res.Pane)
+		fmt.Fprintln(w, "The first start in a new folder may ask you to trust it.")
+	case res.Command != "":
+		fmt.Fprintf(w, "tmux is not running. To start the branch:\n  %s\n", res.Command)
 	}
 	return nil
 }

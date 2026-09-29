@@ -342,9 +342,9 @@ func TestUnknownSession(t *testing.T) {
 func TestCheckpointOnNewPicks(t *testing.T) {
 	f, cs := newFake(t)
 	var calls []string
-	f.srv.Checkpoint = func(sess claude.Session, node, toolUseID string, at time.Time) tree.Checkpoint {
+	f.srv.Checkpoint = func(sess claude.Session, t *tree.Tree, node, toolUseID string, at time.Time) {
 		calls = append(calls, sess.ID+" "+node+" "+toolUseID)
-		return tree.Checkpoint{ToolUseID: toolUseID, Commit: "abc123", At: at}
+		t.Node(node).Checkpoint = tree.Checkpoint{ToolUseID: toolUseID, Commit: "abc123", At: at}
 	}
 	record := func(id string, args map[string]any) {
 		t.Helper()

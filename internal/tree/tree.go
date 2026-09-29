@@ -56,6 +56,7 @@ type Checkpoint struct {
 	Commit    string    `json:"commit,omitempty"`      // snapshot of the working folder, uncommitted work included
 	Ref       string    `json:"ref,omitempty"`         // the hidden ref that keeps the snapshot
 	Memory    string    `json:"memory,omitempty"`      // copy of Claude's memory for the project
+	Tree      string    `json:"tree,omitempty"`        // copy of the whole tree at that moment
 	At        time.Time `json:"at,omitzero"`
 	Missing   string    `json:"missing,omitempty"` // what could not be saved, in plain words; "" = nothing
 }
@@ -105,7 +106,58 @@ type Tree struct {
 	Here      string      `json:"here"`             // "you are here": the newest pick on the live branch
 	Nodes     []*Node     `json:"nodes"`
 	Decisions []*Decision `json:"decisions"`
-	Fixes     []Change    `json:"fixes,omitempty"` // Amir's fixes, newest last, for Undo
+	Fixes     []Change    `json:"fixes,omitempty"`  // Amir's fixes, newest last, for Undo
+	Branch    *Branch     `json:"branch,omitempty"` // set when this session is a branch of another
+}
+
+// Branch says where a branched session came from (PRD 17.3).
+type Branch struct {
+	Name         string    `json:"name"`
+	FromSession  string    `json:"from_session"`
+	FromNode     string    `json:"from_node"`
+	FromDecision string    `json:"from_decision"`
+	Statement    string    `json:"statement"`   // "API framework: FastAPI"
+	CutMessage   string    `json:"cut_message"` // the chat entry the branch resumed at
+	Commit       string    `json:"commit,omitempty"`
+	Repo         string    `json:"repo,omitempty"`     // the original folder
+	Worktree     string    `json:"worktree,omitempty"` // "" = it shares the original folder
+	At           time.Time `json:"at"`
+	Missing      string    `json:"missing,omitempty"` // what is not exact, in plain words
+}
+
+// UpTo is a copy of the tree as far as node id: everything that grew after
+// it is hidden, and id is "you are here". Node and decision ids stay the
+// same, so the chat's references to them still work.
+//
+// It is only a fallback for a branch when no copy of the tree was saved at
+// the time: a decision above id that was changed later shows its later pick.
+func (t *Tree) UpTo(id string) *Tree {
+	c := t.clone()
+	path := c.pathTo(id)
+	for _, d := range c.Decisions {
+		onPath := false
+		for _, o := range d.Options {
+			onPath = onPath || path[o]
+		}
+		if onPath {
+			continue
+		}
+		d.Hidden = true
+		for _, o := range d.Options {
+			c.Node(o).Hidden = true
+		}
+	}
+	c.Here, c.Fixes = id, nil
+	return c
+}
+
+// pathTo is every node from id up to the start.
+func (t *Tree) pathTo(id string) map[string]bool {
+	path := map[string]bool{}
+	for ; id != "" && !path[id]; id = t.ParentOf(t.Node(id)) {
+		path[id] = true
+	}
+	return path
 }
 
 // RootID is the "start" node every tree has.

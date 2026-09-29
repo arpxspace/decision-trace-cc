@@ -443,6 +443,7 @@ Every fix locks the node (section 8).
 | `view [session]` | You | The live view (section 9), in the current terminal. No session = follow the tmux pane in use. |
 | `print [session]` | You | Prints a tree as the same git graph, without colors, then a "Why" list. No session = the newest tree. The first few characters of the id are enough, like a git hash. |
 | `list` | You | Lists saved trees, newest first: when, session, folder, how many decisions, start label |
+| `branch <session> <node>` | You (the view's `b` key later) | Starts a new Claude session from a decision, in a new tmux window: chat, code, memory, and tree as they were then. Shows what it will start with and asks first; `--yes` skips the question, `--focus` jumps to it, `--name` names it |
 | `source <session> [node]` | You | Where each pick came from in the chat (your message, what Claude said before), where a branch would cut, and what its checkpoint saved |
 
 - Same screen libraries as claude-sidebar: Bubble Tea and Lip Gloss.
@@ -712,6 +713,26 @@ honest: it knows what the original knew at that moment, and nothing later.
 If the code checkpoint is missing, the dialog says so plainly: "Exact code
 state unavailable. The current folder will be used." It never pretends.
 
+How step 3 was built, beyond the plan above:
+
+- **The tree is saved at each checkpoint too** (`checkpoints/<session>/<node>/tree.json`).
+  A branch starts with the tree as it was then. Without it, a decision above
+  the branch point that was changed later would show its later pick.
+- **Uncommitted work comes back as uncommitted.** The worktree starts on the
+  original's HEAD, and the snapshot's files are put in place on top. So `git
+  status` in the branch shows the old work as changed, not committed.
+- **The fork step runs with hooks and MCP servers off** (`--settings
+  {"disableAllHooks":true}`, `--strict-mcp-config`). `--bare` can't be used,
+  because it only works with an API key.
+- **Claude is told where it lives now,** twice: in the note that starts the
+  branch's chat, and with `--append-system-prompt` when the window starts.
+  "The project's files are now in <worktree> … the folder <original> belongs to
+  the other session: do not change files there." The old chat is full of the
+  original's paths.
+- `.worktreeinclude` files are copied **as they are now**: git ignores them,
+  so no snapshot has them.
+- If anything fails, the new folder is removed again.
+
 ### 17.3 The trees
 
 - The branch's tree starts as a copy of the parent's tree up to the branch
@@ -763,8 +784,9 @@ state unavailable. The current folder will be used." It never pretends.
 2. ~~Find the cut point: from a tool-use id to the chat entry to cut at.
    Test on a real chat file.~~ Done 29 Sep 2026: cut at the tool's answer to
    the call (`docs/findings.md` part 10). Also `decision-tree source`.
-3. `decision-tree branch <session> <node>`, a plain command that does steps
+3. ~~`decision-tree branch <session> <node>`, a plain command that does steps
    1 to 5 of 17.2. First live test: Amir's acceptance test (spec section 26,
-   FastAPI → "Use Flask instead").
+   FastAPI → "Use Flask instead").~~ Done 29 Sep 2026; the acceptance test
+   passed live (`docs/findings.md` part 11).
 4. The view: `⎇` stubs, provenance in the details panel, and the keys `b`,
    `B`, `enter`, `p`.

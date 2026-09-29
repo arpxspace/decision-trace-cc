@@ -287,6 +287,48 @@ as d1."), and not the "kiwi" message.
 
 `decision-tree source <session> [node]` prints this for each pick.
 
+## 11. First real branch: Amir's acceptance test (branch step 3)
+
+On 29 Sep 2026, `decision-tree branch` ran for real: real Claude, a private
+tmux server, and a scratch git repo. A wrapper script ran the real `claude`
+with the new build as its only MCP server and a scratch folder for trees.
+
+1. Session A: "Use FastAPI as the framework. Create api.txt …", then "Now
+   add Redis for caching …". The tree got "API framework: FastAPI" and
+   "Cache: Redis", each with a checkpoint. The FastAPI snapshot's `api.txt`
+   held only `framework: FastAPI`.
+2. `decision-tree branch 457bb5ff n1 --yes`: it made the worktree, forked the
+   chat (Haiku, hooks and MCP servers off), saved the branch's tree, and
+   opened a tmux window named `api-framework-fastapi` in A's tmux session.
+3. In the branch: "Use Flask instead." Claude changed `api.txt` and logged the
+   change. Asked whether anything was picked for caching, it said: "No, we
+   only made a decision about the API framework (FastAPI, then changed to
+   Flask), but nothing about caching."
+
+```
+ original (457bb5ff)                 branch (9f16c32c)
+ ●  API framework: FastAPI           ├─↺  FastAPI
+ │                                   ●  API framework: Flask  ◀
+ ●  Cache: Redis  ◀
+ api.txt: FastAPI + Redis            api.txt: Flask
+```
+
+The original's files, tree, and `git status` were unchanged. The branch's
+Flask pick got its own checkpoint in the same repo, so a branch can be
+branched again.
+
+Also seen:
+
+- **Haiku missed both decisions** in an earlier try of step 1. The decision
+  was part of a task ("Use FastAPI … Create api.txt"), and Haiku wrote the
+  file without logging. Opus logged both. Watch this during the week of real
+  use.
+- No "trust this folder?" question came up in the branch window this time.
+- The branch window started in "manual mode" (it asks before edits). The
+  original was in auto mode. A resumed session seems not to keep the mode.
+- Claude in the branch once said "recorded the framework change in the
+  decision tree", despite the "log quietly" rule.
+
 ## Side effects of the test
 
 - `git init` made this folder its own git project. Claude Code then asked

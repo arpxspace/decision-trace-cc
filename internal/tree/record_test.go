@@ -277,3 +277,19 @@ func TestJSONRoundTrip(t *testing.T) {
 	// And it still works after loading.
 	rec(t, &back, Call{DecisionID: "d1", Picked: "add a cache", Reason: "r", By: ByUser, At: at(4)})
 }
+
+func TestUpTo(t *testing.T) {
+	tr := New("s1", t0)
+	rec(t, tr, Call{Topic: "API framework", Options: []string{"FastAPI", "Flask"}, Picked: "FastAPI", Reason: "r", By: ByBoth, At: at(1)})
+	rec(t, tr, Call{Topic: "Cache", Options: []string{"Redis", "none"}, Picked: "Redis", Reason: "r", By: ByClaude, At: at(2)})
+	up := tr.UpTo("n1") // FastAPI
+	want(t, up, `
+● start
+  d1 API framework
+    ● FastAPI ◀
+    ○ Flask`)
+	// The ids are the same as in the original, and the original is unchanged.
+	if up.Decision("d2") == nil || !up.Decision("d2").Hidden || tr.Here != "n3" || tr.Decision("d2").Hidden {
+		t.Fatal("UpTo must hide later decisions in a copy, not in the original")
+	}
+}

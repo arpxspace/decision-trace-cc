@@ -12,6 +12,7 @@ package checkpoint
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -198,4 +199,19 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+// SaveTree keeps a copy of the whole tree as it is at a checkpoint, so a
+// branch from it starts with the tree as it was then: a decision above it
+// that was changed later still shows its pick at that time.
+func SaveTree(dir, session, node string, t *tree.Tree) (string, error) {
+	path := filepath.Join(dir, session, node, "tree.json")
+	b, err := json.MarshalIndent(t, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	return path, os.WriteFile(path, append(b, '\n'), 0o644)
 }
