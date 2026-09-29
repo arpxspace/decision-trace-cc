@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"decision-tree/internal/store"
+	"decision-tree/internal/tree"
 )
 
 // TestEndToEnd runs the real binary as an MCP server over stdin/stdout, the
@@ -113,6 +114,22 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(cp.Memory, "MEMORY.md")); err != nil || string(b) != "- the user likes short answers\n" {
 		t.Fatalf("memory copy: %q, %v", b, err)
+	}
+
+	// A branch made from the pick shows in print, under the pick.
+	_, err = store.Store{Dir: filepath.Join(state, "decision-tree")}.Update("bbbbbbbb-2222-4222-8222-222222222222", func(bt *tree.Tree) error {
+		bt.Root().Label = "CRM search is slow"
+		bt.Branch = &tree.Branch{Name: "try-a-cache", FromSession: sid, FromNode: "n2", Statement: "Fix: add a database index"}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := runBin(t, bin, env, "print", "8533"); !strings.Contains(out, "●  Fix: add a database index  ◀\n╰─⎇  try-a-cache · 0 decisions") {
+		t.Errorf("print should show the branch under the pick:\n%s", out)
+	}
+	if out := runBin(t, bin, env, "print", "bbbb"); !strings.Contains(out, `Branch of session 8533417c, from "Fix: add a database index"`) {
+		t.Errorf("print of a branch should say where it came from:\n%s", out)
 	}
 
 	// source shows where the pick came from, and where a branch would cut.

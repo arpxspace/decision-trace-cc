@@ -116,6 +116,7 @@ type Branch struct {
 	FromSession  string    `json:"from_session"`
 	FromNode     string    `json:"from_node"`
 	FromDecision string    `json:"from_decision"`
+	Inherited    int       `json:"inherited"`   // decisions it started with, copied from the original
 	Statement    string    `json:"statement"`   // "API framework: FastAPI"
 	CutMessage   string    `json:"cut_message"` // the chat entry the branch resumed at
 	Commit       string    `json:"commit,omitempty"`

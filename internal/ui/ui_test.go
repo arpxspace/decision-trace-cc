@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -9,7 +10,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"decision-tree/internal/branch"
 	"decision-tree/internal/claude"
+	"decision-tree/internal/graph"
 	"decision-tree/internal/store"
 	"decision-tree/internal/tree"
 )
@@ -68,6 +71,12 @@ func key(s string) tea.Msg {
 		return tea.KeyMsg{Type: tea.KeyDown}
 	case " ":
 		return tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")}
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "right":
+		return tea.KeyMsg{Type: tea.KeyRight}
 	}
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
@@ -354,4 +363,139 @@ func TestScrollKeepsCursorOnScreen(t *testing.T) {
 	if strings.Contains(screen(m), "Step L: yes") {
 		t.Fatal("after g the bottom should have scrolled away")
 	}
+}
+
+// branchWorld: session s1 picked FastAPI (with a checkpoint), and branch b1
+// was made from that pick and changed it to Flask.
+func branchWorld(t *testing.T) (*fake, Deps) {
+	t.Helper()
+	f := newFake(t)
+	f.record(t, "s1", tree.Call{Topic: "API framework", Options: []string{"FastAPI", "Flask"}, Picked: "FastAPI", Reason: "async", By: tree.ByBoth})
+	f.st.Update("s1", func(tr *tree.Tree) error {
+		tr.Node("n1").Checkpoint = tree.Checkpoint{ToolUseID: "toolu_1", Commit: "abcdef1234567890", Memory: "/m"}
+		return nil
+	})
+	f.st.Update("b1", func(tr *tree.Tree) error {
+		tr.Root().Label, tr.Folder = "Notes app", "/w/flask-instead"
+		tr.Record(tree.Call{Topic: "API framework", Options: []string{"FastAPI", "Flask"}, Picked: "FastAPI", Reason: "async", By: tree.ByBoth})
+		tr.Record(tree.Call{DecisionID: "d1", Picked: "Flask", Reason: "simpler", By: tree.ByUser})
+		tr.Record(tree.Call{Topic: "Templates", Options: []string{"Jinja"}, Picked: "Jinja", Reason: "comes with Flask", By: tree.ByClaude})
+		tr.Branch = &tree.Branch{Name: "flask-instead", FromSession: "s1", FromNode: "n1", Inherited: 1, At: f.now}
+		return nil
+	})
+	d := f.deps()
+	d.Branches = func(session string) map[string][]graph.Stub { return branch.Children(f.st, session) }
+	return f, d
+}
+
+func TestBranchStubOpensAndComesBack(t *testing.T) {
+	_, d := branchWorld(t)
+	m := send(New(d, "s1"), tea.WindowSizeMsg{Width: 70, Height: 24})
+	line(t, m, "⎇  flask-instead · 1 decision")
+
+	m = send(m, key("j")) // from FastAPI down to the branch
+	line(t, m, "A branch made from the pick above")
+	m = send(m, key("enter"))
+	line(t, m, "flask-instead · branch of s1 · 2 decisions · pinned")
+	line(t, m, "●  API framework: Flask")
+	line(t, m, "p parent")
+
+	m = send(m, key("p")) // back to the original, on the pick the branch came from
+	line(t, m, "s1 · 1 decision · pinned")
+	if l := line(t, m, "API framework: FastAPI"); !strings.Contains(l, "›") {
+		t.Fatalf("cursor should be on the pick the branch came from: %q", l)
+	}
+	m = send(m, key("p"))
+	line(t, m, "This session did not branch from another one")
+}
+
+func TestSourceScreen(t *testing.T) {
+	_, d := branchWorld(t)
+	d.Source = func(session, node string) (claude.Cut, error) {
+		return claude.Cut{PromptNumber: 2, Prompt: "Yes, go with FastAPI", Before: "I would pick FastAPI for async support."}, nil
+	}
+	m := send(New(d, "s1"), tea.WindowSizeMsg{Width: 70, Height: 30})
+	m = send(m, key("enter"))
+	for _, want := range []string{"API framework: FastAPI", "Your message #2:", "Yes, go with FastAPI",
+		"Claude said just before:", "Code: as it was then (abcdef123456)", "Memory: as it was then", "esc closes · b branches from here"} {
+		line(t, m, want)
+	}
+	next, cmd := m.Update(key("esc"))
+	m = next.(Model)
+	if cmd != nil || strings.Contains(screen(m), "Your message #2:") {
+		t.Fatal("esc should close the source screen, not quit")
+	}
+
+	// When the chat is gone, the screen says a branch can't be made, instead
+	// of promising a chat it no longer has.
+	d.Source = func(string, string) (claude.Cut, error) {
+		return claude.Cut{}, errors.New("the chat file is not on this computer")
+	}
+	gone := send(New(d, "s1"), tea.WindowSizeMsg{Width: 70, Height: 30}, key("enter"))
+	line(t, gone, "The chat: the chat file is not on this computer")
+	line(t, gone, "Chat: not available, so no branch can be made from here")
+
+	m = send(m, key("k"), key("enter")) // Flask, drawn as a stub above FastAPI: rejected
+	line(t, m, "This option was not picked")
+	m = send(m, key("x"), key("k"), key("enter")) // any key closes; then the start node
+	line(t, m, "Nothing was decided here")
+}
+
+func TestBranchFromTheView(t *testing.T) {
+	f, d := branchWorld(t)
+	var made []bool
+	d.Prepare = func(session, node string) (*branch.Plan, error) {
+		tr, _ := f.st.Load(session)
+		return &branch.Plan{Parent: tr, Node: tr.Node(node), Cut: claude.Cut{PromptNumber: 1, Prompt: "Build an API"},
+			Name: "api-framework-fastapi", Session: "b2", Repo: "/w/app", Worktree: "/wt/api", Dir: "/wt/api", Memory: 1}, nil
+	}
+	d.Create = func(p *branch.Plan, focus bool) (branch.Result, error) {
+		made = append(made, focus)
+		return branch.Result{Pane: "%9"}, nil
+	}
+	m := send(New(d, "s1"), tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	m = send(m, key("b"))
+	line(t, m, "Create a branch?")
+	line(t, m, "Branch from:  API framework: FastAPI")
+	line(t, m, "y creates it · n cancels")
+	m = send(m, key("n"))
+	if strings.Contains(screen(m), "Create a branch?") || len(made) != 0 {
+		t.Fatal("n should cancel")
+	}
+
+	m = send(m, key("B"))
+	next, cmd := m.Update(key("y"))
+	m = next.(Model)
+	line(t, m, "Making the branch…")
+	if cmd == nil {
+		t.Fatal("y should start making the branch")
+	}
+	m = send(m, cmd())
+	line(t, m, "Created branch api-framework-fastapi")
+	line(t, m, "tmux: a new window named api-framework-fastapi.")
+	if len(made) != 1 || !made[0] {
+		t.Fatalf("Create calls: %v, want one with focus (B)", made)
+	}
+
+	d.Prepare = func(string, string) (*branch.Plan, error) {
+		return nil, errors.New("it was logged before checkpoints existed")
+	}
+	m = send(New(d, "s1"), tea.WindowSizeMsg{Width: 80, Height: 30}, key("b"))
+	line(t, m, "Can't branch from here")
+	line(t, m, "it was logged before checkpoints existed")
+}
+
+func TestNewBranchesShowUpOnTheirOwn(t *testing.T) {
+	f, d := branchWorld(t)
+	stubs := map[string][]graph.Stub{}
+	d.Branches = func(string) map[string][]graph.Stub { return stubs }
+	m := send(New(d, "s1"), tea.WindowSizeMsg{Width: 70, Height: 24})
+	if strings.Contains(screen(m), "⎇") {
+		t.Fatal("no branches yet")
+	}
+	stubs = map[string][]graph.Stub{"n1": {{Session: "b9", Name: "late-branch", Decisions: 0}}}
+	f.now = f.now.Add(2 * time.Second)
+	m = send(m, tickMsg{})
+	line(t, m, "⎇  late-branch · 0 decisions")
 }

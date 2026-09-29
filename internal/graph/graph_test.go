@@ -39,7 +39,7 @@ func notesApp(t *testing.T) *tree.Tree {
 }
 
 func TestMainLine(t *testing.T) {
-	want(t, Plain(Layout(notesApp(t), nil)), `
+	want(t, Plain(Layout(notesApp(t), nil, nil)), `
 ●  Notes app database choice
 │
 ├─×  Postgres
@@ -69,7 +69,7 @@ func crm(t *testing.T) *tree.Tree {
 }
 
 func TestDroppedBranchGetsALane(t *testing.T) {
-	want(t, Plain(Layout(crm(t), nil)), `
+	want(t, Plain(Layout(crm(t), nil, nil)), `
 ●  CRM search is slow
 │
 ├─×  Rust rewrite
@@ -89,7 +89,7 @@ func TestFolding(t *testing.T) {
 	tr := crm(t)
 	// A dropped branch starts folded.
 	fold := func(id string) bool { return DefaultFolded(tr, id) }
-	want(t, Plain(Layout(tr, fold)), `
+	want(t, Plain(Layout(tr, fold, nil)), `
 ●  CRM search is slow
 │
 ├─×  Rust rewrite
@@ -102,7 +102,7 @@ func TestFolding(t *testing.T) {
 ╰─◌  1 hour`)
 
 	// Folding the start hides everything.
-	want(t, Plain(Layout(tr, func(id string) bool { return id == tree.RootID })), `●  CRM search is slow ▸ 7 more`)
+	want(t, Plain(Layout(tr, func(id string) bool { return id == tree.RootID }, nil)), `●  CRM search is slow ▸ 7 more`)
 
 	if !HasChildren(tr, tree.RootID) || HasChildren(tr, "n1") || DefaultFolded(tr, "n2") {
 		t.Fatal("HasChildren or DefaultFolded is wrong")
@@ -117,7 +117,7 @@ func TestDroppedLeafIsAStub(t *testing.T) {
 		tree.Call{Topic: "CLI library", Options: []string{"cobra"}, Picked: "cobra", Reason: "common", By: tree.ByClaude},
 		tree.Call{Topic: "Config format", Options: []string{"TOML", "YAML"}, After: "n1", Reason: "rethink"},
 	)
-	want(t, Plain(Layout(tr, nil)), `
+	want(t, Plain(Layout(tr, nil, nil)), `
 ●  App
 │
 ●  Language: Go  ◀
@@ -137,7 +137,7 @@ func TestLaneThatEndsTheGraph(t *testing.T) {
 		tree.Call{Topic: "CLI library", Options: []string{"cobra"}, Picked: "cobra", Reason: "common", By: tree.ByClaude},
 	)
 	tr.Node("n1").State, tr.Here = tree.Dropped, tree.RootID
-	want(t, Plain(Layout(tr, nil)), `
+	want(t, Plain(Layout(tr, nil, nil)), `
 ●  App  ◀
 │
 ╰─╮
@@ -151,7 +151,7 @@ func TestDeletedNodesAreLeftOut(t *testing.T) {
 	if err := tr.FixDelete("n2"); err != nil { // Postgres
 		t.Fatal(err)
 	}
-	got := Plain(Layout(tr, nil))
+	got := Plain(Layout(tr, nil, nil))
 	if strings.Contains(got, "Postgres") {
 		t.Fatalf("deleted node still drawn:\n%s", got)
 	}
@@ -161,7 +161,7 @@ func TestDeletedNodesAreLeftOut(t *testing.T) {
 }
 
 func TestRowsForTheCursor(t *testing.T) {
-	rows := Layout(notesApp(t), nil)
+	rows := Layout(notesApp(t), nil, nil)
 	var nodes, here int
 	for _, r := range rows {
 		if r.Kind == Node {
@@ -186,8 +186,51 @@ func TestOldTreeFilesStillLoad(t *testing.T) {
 	if err := json.Unmarshal([]byte(old), &tr); err != nil {
 		t.Fatal(err)
 	}
-	want(t, Plain(Layout(&tr, nil)), `
+	want(t, Plain(Layout(&tr, nil, nil)), `
 ●  App
 │
 ●  Database for the app?: SQLite  ◀`)
+}
+
+func TestBranches(t *testing.T) {
+	tr := build(t, "Build an API",
+		tree.Call{Topic: "API framework", Options: []string{"FastAPI", "Flask"}, Picked: "FastAPI", Reason: "r", By: tree.ByBoth},
+		tree.Call{Topic: "Cache", Options: []string{"Redis"}, Picked: "Redis", Reason: "r", By: tree.ByClaude},
+		tree.Call{DecisionID: "d1", Options: []string{"Django"}, Picked: "Django", Reason: "r", By: tree.ByUser},
+	)
+	// FastAPI was later changed to Django, so it is a stub now; Redis is the
+	// last pick. Branches were made from FastAPI (twice) and from Redis.
+	branches := map[string][]Stub{
+		"n1": {{Session: "b1", Name: "flask-instead", Decisions: 1}, {Session: "b2", Name: "try-litestar", Decisions: 3}},
+		"n3": {{Session: "b3", Name: "no-cache", Decisions: 0}},
+	}
+	want(t, Plain(Layout(tr, nil, branches)), `
+●  Build an API
+│
+├─╮
+│ ↺  API framework: FastAPI
+│ ├─⎇  flask-instead · 1 decision
+│ ╰─⎇  try-litestar · 3 decisions
+├─×  Flask
+●  API framework: Django
+│
+●  Cache: Redis  ◀
+╰─⎇  no-cache · 0 decisions`)
+
+	rows := Layout(tr, nil, branches)
+	var found []string
+	for _, r := range rows {
+		if r.Kind == Branch {
+			found = append(found, r.Session+"@"+r.NodeID)
+		}
+	}
+	if strings.Join(found, " ") != "b1@n1 b2@n1 b3@n3" {
+		t.Fatalf("branch rows: %v", found)
+	}
+
+	// Folding a node folds its branches too, and counts them.
+	folded := Layout(tr, func(id string) bool { return id == "n1" }, branches)
+	if got := Plain(folded); !strings.Contains(got, "│ ↺  API framework: FastAPI ▸ 2 more") {
+		t.Fatalf("folded:\n%s", got)
+	}
 }

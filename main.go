@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -108,8 +109,17 @@ func view(args []string) error {
 		}
 		return claude.InPane(dir, pane)
 	}
-	p := tea.NewProgram(ui.New(ui.Deps{Store: s, Active: active, Now: time.Now}, pinned),
-		tea.WithAltScreen(), tea.WithFPS(20))
+	bd := branchDeps(s)
+	deps := ui.Deps{
+		Store: s, Active: active, Now: time.Now,
+		Branches: func(session string) map[string][]graph.Stub { return branch.Children(s, session) },
+		Source:   func(session, node string) (claude.Cut, error) { return findSource(s, dir, session, node) },
+		Prepare:  func(session, node string) (*branch.Plan, error) { return branch.Prepare(bd, session, node, "") },
+		Create: func(p *branch.Plan, focus bool) (branch.Result, error) {
+			return branch.Create(context.Background(), bd, p, focus)
+		},
+	}
+	p := tea.NewProgram(ui.New(deps, pinned), tea.WithAltScreen(), tea.WithFPS(20))
 	// Closing the iTerm2 pane sends SIGHUP; quit cleanly then.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGHUP)
@@ -131,8 +141,11 @@ func printTree(s store.Store, args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "%s · session %s · %d decisions\n\n%s\n", folderName(t), short(id), countDecisions(t),
-		graph.Plain(graph.Layout(t, nil)))
+	fmt.Fprintf(w, "%s · session %s · %d decisions\n", folderName(t), short(id), countDecisions(t))
+	if b := t.Branch; b != nil {
+		fmt.Fprintf(w, "Branch of session %s, from %q (%s)\n", short(b.FromSession), b.Statement, b.At.Local().Format("02 Jan 15:04"))
+	}
+	fmt.Fprintf(w, "\n%s\n", graph.Plain(graph.Layout(t, nil, branch.Children(s, id))))
 	var why []string
 	for _, n := range t.Nodes {
 		switch {
@@ -152,11 +165,7 @@ func printTree(s store.Store, args []string, w io.Writer) error {
 // branchCmd makes a branch from a decision (PRD 17.2), after showing what
 // it will start with and asking.
 func branchCmd(args []string, in io.Reader, w io.Writer) error {
-	st := store.Default()
-	d := branch.Deps{
-		Store: st, ClaudeDir: claude.Dir(), Tmux: tmux.Tmux{Bin: tmux.FindBin()},
-		Worktrees: filepath.Join(st.Dir, "worktrees"), Now: time.Now,
-	}
+	d := branchDeps(store.Default())
 	var pos []string
 	var name string
 	var focus, yes bool
@@ -219,6 +228,30 @@ func branchCmd(args []string, in io.Reader, w io.Writer) error {
 		fmt.Fprintf(w, "tmux is not running. To start the branch:\n  %s\n", res.Command)
 	}
 	return nil
+}
+
+func branchDeps(st store.Store) branch.Deps {
+	return branch.Deps{
+		Store: st, ClaudeDir: claude.Dir(), Tmux: tmux.Tmux{Bin: tmux.FindBin()},
+		Worktrees: filepath.Join(st.Dir, "worktrees"), Now: time.Now,
+	}
+}
+
+// findSource finds where the pick node of session came from in the chat.
+func findSource(st store.Store, claudeDir, session, node string) (claude.Cut, error) {
+	t, err := st.Load(session)
+	if err != nil {
+		return claude.Cut{}, err
+	}
+	n := t.Node(node)
+	if n == nil || n.Checkpoint.ToolUseID == "" {
+		return claude.Cut{}, errors.New("not saved: this was logged before checkpoints existed")
+	}
+	chat, err := claude.ChatPath(claudeDir, session)
+	if err != nil {
+		return claude.Cut{}, errors.New("the chat file is not on this computer")
+	}
+	return claude.FindCut(chat, n.Checkpoint.ToolUseID)
 }
 
 // source prints where a decision came from, and what a branch from it

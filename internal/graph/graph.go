@@ -30,21 +30,30 @@ import (
 type Kind int
 
 const (
-	Node Kind = iota // the start, or an option; the cursor stops here
-	Line             // only lines: "│" between decisions, "├─╮" into a lane
-	Open             // the heading of a decision still being weighed
+	Node   Kind = iota // the start, or an option; the cursor stops here
+	Line               // only lines: "│" between decisions, "├─╮" into a lane
+	Open               // the heading of a decision still being weighed
+	Branch             // another session that branched from the node above (PRD 17.3)
 )
 
 // Row is one line of the graph.
 type Row struct {
-	Kind   Kind
-	Graph  string     // the lines left of the symbol, like "│ ├─"
-	Symbol string     // ● ○ ◌ ✗ for nodes
-	Text   string     // "Database used: SQLite"
-	NodeID string     // for Node rows
-	State  tree.State // for Node rows
-	Here   bool       // "you are here"
-	Folded int        // how many nodes are folded away under this one
+	Kind    Kind
+	Graph   string     // the lines left of the symbol, like "│ ├─"
+	Symbol  string     // ● ○ ◌ ✗ for nodes
+	Text    string     // "Database used: SQLite"
+	NodeID  string     // for Node rows
+	State   tree.State // for Node rows
+	Here    bool       // "you are here"
+	Folded  int        // how many rows are folded away under this one
+	Session string     // for Branch rows: the branch's session
+}
+
+// Stub is a branch to draw under the node it came from.
+type Stub struct {
+	Session   string
+	Name      string
+	Decisions int // how many decisions the branch has
 }
 
 // Symbols for each state.
@@ -56,12 +65,13 @@ var Symbols = map[tree.State]string{
 }
 
 // Layout draws the visible tree. folded says which nodes hide what grows
-// from them; nil folds nothing.
-func Layout(t *tree.Tree, folded func(id string) bool) []Row {
+// from them; nil folds nothing. branches are the sessions that branched from
+// each node, by node id; nil draws none.
+func Layout(t *tree.Tree, folded func(id string) bool, branches map[string][]Stub) []Row {
 	if folded == nil {
 		folded = func(string) bool { return false }
 	}
-	l := &layout{t: t, folded: folded}
+	l := &layout{t: t, folded: folded, branches: branches}
 	l.node(t.Root(), "", "")
 	return l.rows
 }
@@ -85,17 +95,21 @@ func DefaultFolded(t *tree.Tree, id string) bool {
 }
 
 type layout struct {
-	t      *tree.Tree
-	folded func(string) bool
-	rows   []Row
+	t        *tree.Tree
+	folded   func(string) bool
+	branches map[string][]Stub
+	rows     []Row
 }
+
+// kids reports whether anything is drawn under node id: decisions or branches.
+func (l *layout) kids(id string) bool { return HasChildren(l.t, id) || len(l.branches[id]) > 0 }
 
 // node draws n on the lane that starts with pre, then everything that grows
 // from it. lead is the connector right before n's symbol: "" on the main
 // line of a lane, "├─" or "╰─" for a stub.
 func (l *layout) node(n *tree.Node, pre, lead string) {
 	r := Row{Kind: Node, Graph: pre + lead, Symbol: l.symbol(n), Text: l.text(n, lead != ""), NodeID: n.ID, State: n.State, Here: n.ID == l.t.Here}
-	if !HasChildren(l.t, n.ID) {
+	if !l.kids(n.ID) {
 		l.rows = append(l.rows, r)
 		return
 	}
@@ -105,7 +119,24 @@ func (l *layout) node(n *tree.Node, pre, lead string) {
 		return
 	}
 	l.rows = append(l.rows, r)
+	// Branches first, right under the node they came from.
+	stubs := l.branches[n.ID]
+	for i, b := range stubs {
+		fork := "├─"
+		if i == len(stubs)-1 && !HasChildren(l.t, n.ID) {
+			fork = "╰─"
+		}
+		l.rows = append(l.rows, Row{Kind: Branch, Graph: pre + fork, Symbol: "⎇",
+			Text: b.Name + " · " + decisionCount(b.Decisions), Session: b.Session, NodeID: n.ID})
+	}
 	l.children(n.ID, pre)
+}
+
+func decisionCount(n int) string {
+	if n == 1 {
+		return "1 decision"
+	}
+	return strconv.Itoa(n) + " decisions"
 }
 
 // children draws the decisions that grow from node id, on the lane pre.
@@ -147,7 +178,7 @@ func (l *layout) children(id, pre string) {
 			if last {
 				fork, down = "╰─", "  "
 			}
-			if HasChildren(l.t, o.ID) {
+			if l.kids(o.ID) {
 				l.rows = append(l.rows, Row{Kind: Line, Graph: pre + fork + "╮"})
 				l.node(o, pre+down, "")
 			} else {
@@ -183,9 +214,10 @@ func (l *layout) text(n *tree.Node, stub bool) string {
 	return l.t.Statement(n)
 }
 
-// count is how many visible nodes grow from id, all the way down.
+// count is how many visible nodes and branches grow from id, all the way
+// down.
 func (l *layout) count(id string) int {
-	n := 0
+	n := len(l.branches[id])
 	for _, d := range l.t.Decisions {
 		if d.Parent != id || d.Hidden {
 			continue

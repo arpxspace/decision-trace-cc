@@ -23,11 +23,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"decision-tree/internal/claude"
+	"decision-tree/internal/graph"
 	"decision-tree/internal/store"
 	"decision-tree/internal/tmux"
 	"decision-tree/internal/tree"
@@ -135,8 +137,14 @@ func Prepare(d Deps, session, node, name string) (*Plan, error) {
 		missing = append(missing, "code")
 	}
 	p.Tree.SessionID, p.Tree.Folder, p.Tree.Fixes = p.Session, p.Dir, nil
+	inherited := 0
+	for _, d := range p.Tree.Decisions {
+		if !d.Hidden {
+			inherited++
+		}
+	}
 	p.Tree.Branch = &tree.Branch{
-		Name: p.Name, FromSession: id, FromNode: n.ID, FromDecision: n.Decision,
+		Name: p.Name, FromSession: id, FromNode: n.ID, FromDecision: n.Decision, Inherited: inherited,
 		Statement: parent.Statement(n), CutMessage: cut.UUID, Commit: cp.Commit,
 		Repo: p.Repo, Worktree: p.Worktree, At: d.Now(),
 	}
@@ -495,4 +503,37 @@ func clip(s string, n int) string {
 		return string(r[:n-1]) + "…"
 	}
 	return s
+}
+
+// Children are the branches made from session, by the node each came from,
+// oldest first. Trees that cannot be read are skipped.
+func Children(st store.Store, session string) map[string][]graph.Stub {
+	infos, _ := st.List()
+	type found struct {
+		node string
+		at   time.Time
+		stub graph.Stub
+	}
+	var all []found
+	for _, in := range infos {
+		t, err := st.Load(in.SessionID)
+		if err != nil || t.Branch == nil || t.Branch.FromSession != session {
+			continue
+		}
+		n := 0
+		for _, d := range t.Decisions {
+			if !d.Hidden {
+				n++
+			}
+		}
+		// Decisions the branch made itself, not the ones it started with.
+		n -= t.Branch.Inherited
+		all = append(all, found{t.Branch.FromNode, t.Branch.At, graph.Stub{Session: t.SessionID, Name: t.Branch.Name, Decisions: max(n, 0)}})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].at.Before(all[j].at) })
+	out := map[string][]graph.Stub{}
+	for _, f := range all {
+		out[f.node] = append(out[f.node], f.stub)
+	}
+	return out
 }

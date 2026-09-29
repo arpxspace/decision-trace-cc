@@ -739,28 +739,52 @@ How step 3 was built, beyond the plan above:
   point. New decisions grow from there. Changing the branch-point decision
   ("Use Flask instead") is an ordinary change in place, in the branch's own
   copy.
-- The parent's tree shows each branch as a stub at the node it came from:
+- The parent's tree shows each branch right under the pick it came from.
+  This is how the view drew the acceptance test's trees on 29 Sep 2026:
 
 ```
- ●  API framework: FastAPI
- │
- ├─⎇  api-framework-fastapi · 1 decision      ← a branch, in session B
- ●  Cache: Redis  ◀
+ api2 · 2 decisions · pinned
+
+         ●  Tiny API plan with FastAPI
+         │
+         ●  API framework: FastAPI
+         ├─⎇  api-framework-fastapi · 1 decision     ← a branch, in session B
+         │
+       › ●  Cache: Redis  ◀
 ```
 
+- The count is the decisions the branch made itself, not the ones it
+  started with (the tree file keeps how many it inherited).
+- A branch off a pick that later became a side stub (changed, `↺`) turns
+  that stub into a lane, like any stub with things under it.
+- Folding a pick folds its branches too.
 - The branch's tree file records where it came from: parent session, parent
-  node and decision, cut message, snapshot, worktree, name, and time. The
-  details panel shows it ("Branched from 'FastAPI' in session 582f6336 at 14:32").
+  node and decision, cut message, snapshot, worktree, name, and time. In the
+  branch, the header says "branch of <session>", the details of the branch
+  point say "this branch starts here", and `print` adds a "Branch of session
+  …, from …" line.
+- New branches show up in the parent's view on their own, within a second:
+  the view looks for them in the saved trees once a second.
 
 ### 17.4 Keys
 
+Built on 29 Sep 2026:
+
 | Key | Does |
 |-----|------|
-| `enter` | Show the source: the chat around the decision (Esc to close). Folding moves to `space` only. |
-| `b` | Branch from this decision (asks first) |
-| `B` | Branch, then jump to the new Claude pane |
-| `p` | In a branch: show the parent session's tree |
-| `[` `]` | Previous / next sibling branch (later) |
+| `enter` on a pick | The source screen: who picked it and when, your message, what Claude said just before, and what a branch from here would start with (chat, code, memory). `esc` closes it; `b` branches from it. |
+| `enter` on `⎇` | Opens that branch's tree |
+| `b` | Branch from the pick under the cursor. Shows the plan and asks: `y` makes it, `n` cancels. While it is made (a few seconds), the view says so; then it says what was made, or why not. |
+| `B` | The same, then jumps to the new tmux window |
+| `p` | In a branch: opens the tree it came from, with the cursor on the pick it came from |
+| `space` | Fold or unfold. (`enter` no longer folds.) |
+| `q` / `esc` | Close the screen on top, or quit when there is none |
+
+The help line at the bottom now fits the pane: the keys that matter right
+now come first (`←/→ scroll` when the tree is wide, `p parent` in a branch,
+`f follow` when pinned), and whatever doesn't fit is left off.
+
+Still to come: `[` `]` to step between sibling branches.
 
 ### 17.5 Not in the first version
 
@@ -788,5 +812,5 @@ How step 3 was built, beyond the plan above:
    1 to 5 of 17.2. First live test: Amir's acceptance test (spec section 26,
    FastAPI → "Use Flask instead").~~ Done 29 Sep 2026; the acceptance test
    passed live (`docs/findings.md` part 11).
-4. The view: `⎇` stubs, provenance in the details panel, and the keys `b`,
-   `B`, `enter`, `p`.
+4. ~~The view: `⎇` stubs, provenance in the details panel, and the keys `b`,
+   `B`, `enter`, `p`.~~ Done 29 Sep 2026 (17.3, 17.4).

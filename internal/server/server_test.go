@@ -127,7 +127,7 @@ func graphOf(t *testing.T, f *fake) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return graph.Plain(graph.Layout(tr, nil))
+	return graph.Plain(graph.Layout(tr, nil, nil))
 }
 
 func wantGraph(t *testing.T, f *fake, picture string) {
