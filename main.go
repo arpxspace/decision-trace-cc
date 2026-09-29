@@ -38,6 +38,9 @@ Usage:
   decision-tree print [session]   print a tree: the newest one, or the session
                                   given (the start of its id is enough)
   decision-tree list              list saved trees, newest first
+  decision-tree source <session> [node]
+                                  where each pick came from in the chat, and
+                                  its checkpoint (one node, or every pick)
   decision-tree mcp               run the MCP server (Claude Code starts this)
   decision-tree version
 `
@@ -59,6 +62,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = printTree(store.Default(), args[1:], stdout)
 	case "list":
 		err = list(store.Default(), stdout)
+	case "source":
+		err = source(store.Default(), claude.Dir(), args[1:], stdout)
 	case "version":
 		fmt.Fprintln(stdout, version)
 	case "help", "-h", "--help":
@@ -129,6 +134,82 @@ func printTree(s store.Store, args []string, w io.Writer) error {
 	}
 	if len(why) > 0 {
 		fmt.Fprintf(w, "\nWhy\n%s\n", strings.Join(why, "\n"))
+	}
+	return nil
+}
+
+// source prints where a decision came from, and what a branch from it
+// would start with (PRD 17).
+func source(s store.Store, claudeDir string, args []string, w io.Writer) error {
+	if len(args) < 1 || len(args) > 2 {
+		return fmt.Errorf("usage: decision-tree source <session> [node]")
+	}
+	id, err := s.Find(args[0])
+	if err != nil {
+		return err
+	}
+	t, err := s.Load(id)
+	if err != nil {
+		return err
+	}
+	if len(args) == 2 {
+		n := t.Node(args[1])
+		if n == nil || n.Hidden {
+			return fmt.Errorf("there is no node %s in session %s", args[1], short(id))
+		}
+		return sourceOf(t, n, claudeDir, w)
+	}
+	first := true
+	for _, n := range t.Nodes {
+		if n.Hidden || n.Decision == "" || (n.State != tree.Picked && n.State != tree.Dropped) {
+			continue
+		}
+		if !first {
+			fmt.Fprintln(w)
+		}
+		first = false
+		if err := sourceOf(t, n, claudeDir, w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sourceOf(t *tree.Tree, n *tree.Node, claudeDir string, w io.Writer) error {
+	id := t.SessionID
+	cp := n.Checkpoint
+	fmt.Fprintf(w, "%s (%s) · %s\n", t.Statement(n), n.ID, n.At.Local().Format("02 Jan 15:04"))
+	if cp.ToolUseID == "" {
+		fmt.Fprintln(w, "No checkpoint: this was logged before checkpoints existed, or it was never picked.")
+		return nil
+	}
+	chat, err := claude.ChatPath(claudeDir, id)
+	var cut claude.Cut
+	if err == nil {
+		cut, err = claude.FindCut(chat, cp.ToolUseID)
+	}
+	if err != nil {
+		fmt.Fprintf(w, "Chat: not found (%v)\n", err)
+	} else {
+		fmt.Fprintf(w, "After your message #%d: %q\n", cut.PromptNumber, cut.Prompt)
+		if cut.Before != "" {
+			fmt.Fprintf(w, "Claude said before: %q\n", cut.Before)
+		}
+		fmt.Fprintf(w, "A branch would cut the chat at: %s\n", cut.UUID)
+	}
+	switch {
+	case cp.Commit != "":
+		fmt.Fprintf(w, "Code: %s in %s (%s)\n", cp.Commit[:min(12, len(cp.Commit))], cp.Repo, cp.Ref)
+	default:
+		fmt.Fprintln(w, "Code: not available")
+	}
+	if cp.Memory != "" {
+		fmt.Fprintf(w, "Memory: %s\n", cp.Memory)
+	} else {
+		fmt.Fprintln(w, "Memory: none saved")
+	}
+	if cp.Missing != "" {
+		fmt.Fprintf(w, "Missing: %s\n", cp.Missing)
 	}
 	return nil
 }

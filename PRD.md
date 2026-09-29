@@ -443,6 +443,7 @@ Every fix locks the node (section 8).
 | `view [session]` | You | The live view (section 9), in the current terminal. No session = follow the tmux pane in use. |
 | `print [session]` | You | Prints a tree as the same git graph, without colors, then a "Why" list. No session = the newest tree. The first few characters of the id are enough, like a git hash. |
 | `list` | You | Lists saved trees, newest first: when, session, folder, how many decisions, start label |
+| `source <session> [node]` | You | Where each pick came from in the chat (your message, what Claude said before), where a branch would cut, and what its checkpoint saved |
 
 - Same screen libraries as claude-sidebar: Bubble Tea and Lip Gloss.
   The MCP server uses the official MCP library for Go
@@ -759,8 +760,9 @@ state unavailable. The current folder will be used." It never pretends.
 
 1. ~~Save checkpoints at each decision: the tool-use id, the git snapshot, and
    the memory copy. Tests with a scratch git repo.~~ Done 29 Sep 2026.
-2. Find the cut point: from a tool-use id to the chat entry to cut at.
-   Test on a real chat file.
+2. ~~Find the cut point: from a tool-use id to the chat entry to cut at.
+   Test on a real chat file.~~ Done 29 Sep 2026: cut at the tool's answer to
+   the call (`docs/findings.md` part 10). Also `decision-tree source`.
 3. `decision-tree branch <session> <node>`, a plain command that does steps
    1 to 5 of 17.2. First live test: Amir's acceptance test (spec section 26,
    FastAPI → "Use Flask instead").

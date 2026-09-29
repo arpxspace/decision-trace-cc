@@ -249,6 +249,44 @@ Public flags that help: `--fork-session` (resume under a new id),
 - Each `record_decision` call carries `claudecode/toolUseId` (part 1). That
   finds the chat entry where the decision was logged: the cut point.
 
+## 10. The cut point (branch step 2)
+
+Where to cut the chat for a branch from a decision. Tested on 29 Sep 2026.
+
+**The rule:** cut at the tool's answer to the `record_decision` call (the
+`tool_result` entry). The branch keeps the user's message, Claude's words
+before the call, and the decision itself. It drops the rest of that turn and
+everything after. That is the same moment the code snapshot was taken, so the
+chat and the code agree.
+
+A real chat file, around one of Amir's decisions (session `24859e5a`):
+
+```
+ 51 user       "go with sqllite. also call the main table notes"
+ 52–54         attachments (hook notes)
+ 55 assistant  thinking
+ 56 assistant  tool_use record_decision  (id …caLnap)
+ 58 user       tool_result for …caLnap   ← cut here (fa2d73c5)
+ 61 assistant  thinking, then the rest of the turn
+```
+
+Each entry points to the one before it with `parentUuid`. `FindCut`
+(`internal/claude/cut.go`) finds the call by its tool-use id, then the result.
+It walks back to find the user's message, and what Claude said last before
+the call.
+
+**On real chats:** all 4 `record_decision` calls in Amir's chats resolved. The
+one checked by hand (`caLnap`) cut at `fa2d73c5`, after message #2, and
+"Claude said before" was the options table from the turn before.
+
+**Live:** a scratch session logged "Database: PostgreSQL" with the new build,
+then got one more message ("remember the word kiwi"). A fork with
+`--resume-session-at` at the cut (the middle of Claude's turn) worked with no
+error. The branch knew the PostgreSQL message and the decision call ("Saved
+as d1."), and not the "kiwi" message.
+
+`decision-tree source <session> [node]` prints this for each pick.
+
 ## Side effects of the test
 
 - `git init` made this folder its own git project. Claude Code then asked

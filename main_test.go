@@ -50,8 +50,14 @@ func TestEndToEnd(t *testing.T) {
 	writeFile(t, filepath.Join(repo, "app.txt"), "v2, not committed\n")
 	writeFile(t, filepath.Join(cfg, "sessions", strconv.Itoa(os.Getpid())+".json"),
 		`{"pid":1,"sessionId":"`+sid+`","cwd":"`+repo+`","status":"idle"}`)
-	writeFile(t, filepath.Join(cfg, "projects", "-w-crm", sid+".jsonl"),
-		`{"type":"ai-title","aiTitle":"CRM search is slow","sessionId":"`+sid+`"}`+"\n")
+	// The chat, as Claude Code writes it: the user's message, Claude's call
+	// to record_decision, and the tool's answer (docs/findings.md part 9).
+	writeFile(t, filepath.Join(cfg, "projects", "-w-crm", sid+".jsonl"), strings.Join([]string{
+		`{"type":"ai-title","aiTitle":"CRM search is slow","sessionId":"` + sid + `"}`,
+		`{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"Search is slow. Add an index."}}`,
+		`{"type":"assistant","uuid":"u2","parentUuid":"u1","message":{"content":[{"type":"tool_use","id":"toolu_e2e","name":"mcp__decision-tree__record_decision"}]}}`,
+		`{"type":"user","uuid":"u3","parentUuid":"u2","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_e2e","content":"Saved as d1."}]}}`,
+	}, "\n")+"\n")
 	writeFile(t, filepath.Join(cfg, "projects", "-w-crm", "memory", "MEMORY.md"), "- the user likes short answers\n")
 
 	cmd := exec.Command(bin, "mcp")
@@ -107,6 +113,20 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(cp.Memory, "MEMORY.md")); err != nil || string(b) != "- the user likes short answers\n" {
 		t.Fatalf("memory copy: %q, %v", b, err)
+	}
+
+	// source shows where the pick came from, and where a branch would cut.
+	out = runBin(t, bin, env, "source", "8533")
+	for _, want := range []string{
+		"Fix: add a database index (n2)",
+		`After your message #1: "Search is slow. Add an index."`,
+		"A branch would cut the chat at: u3",
+		"Code: " + cp.Commit[:12],
+		"Memory: " + cp.Memory,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("source is missing %q:\n%s", want, out)
+		}
 	}
 }
 
