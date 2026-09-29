@@ -74,7 +74,7 @@ func shape(tr *Tree) string {
 			if d.Parent != n.ID || d.Hidden {
 				continue
 			}
-			b.WriteString(strings.Repeat("  ", depth+1) + d.ID + " " + d.Question + "\n")
+			b.WriteString(strings.Repeat("  ", depth+1) + d.ID + " " + d.Topic + "\n")
 			for _, id := range d.Options {
 				if o := tr.Node(id); !o.Hidden {
 					node(o, depth+2)
@@ -93,8 +93,8 @@ func shape(tr *Tree) string {
 func crm(t *testing.T) *Tree {
 	t.Helper()
 	tr := New("s1", t0)
-	rec(t, tr, Call{Question: "Which fix for slow search?", Options: []string{"Rewrite in Rust", "add a cache", "add a database index"}, At: at(1)})
+	rec(t, tr, Call{Topic: "Which fix for slow search?", Options: []string{"Rewrite in Rust", "add a cache", "add a database index"}, At: at(1)})
 	rec(t, tr, Call{DecisionID: "d1", Picked: "add a database index", Reason: "fixes the query itself", By: ByBoth, At: at(2)})
-	rec(t, tr, Call{Question: "Which index?", Options: []string{"on email", "on company + date"}, Picked: "on company + date", Reason: "matches the search", By: ByClaude, At: at(3)})
+	rec(t, tr, Call{Topic: "Which index?", Options: []string{"on email", "on company + date"}, Picked: "on company + date", Reason: "matches the search", By: ByClaude, At: at(3)})
 	return tr
 }

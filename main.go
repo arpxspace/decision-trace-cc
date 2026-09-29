@@ -7,15 +7,24 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"text/tabwriter"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"decision-tree/internal/claude"
+	"decision-tree/internal/graph"
 	"decision-tree/internal/render"
 	"decision-tree/internal/server"
 	"decision-tree/internal/store"
+	"decision-tree/internal/tmux"
 	"decision-tree/internal/tree"
+	"decision-tree/internal/ui"
 )
 
 const version = "0.1.0"
@@ -23,11 +32,13 @@ const version = "0.1.0"
 const usage = `decision-tree: the big choices of a Claude Code session, as a tree
 
 Usage:
-  decision-tree mcp               run the MCP server (Claude Code starts this)
+  decision-tree view [session]    the live view. With no session, it follows
+                                  the tmux pane you are in. Keys: j/k move,
+                                  space fold, . you-are-here, f follow, q quit
   decision-tree print [session]   print a tree: the newest one, or the session
                                   given (the start of its id is enough)
-        --ids                     also show decision and node ids
   decision-tree list              list saved trees, newest first
+  decision-tree mcp               run the MCP server (Claude Code starts this)
   decision-tree version
 `
 
@@ -42,6 +53,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "mcp":
 		err = server.New().MCP(version).Run(context.Background(), &mcp.StdioTransport{})
+	case "view":
+		err = view(args[1:])
 	case "print":
 		err = printTree(store.Default(), args[1:], stdout)
 	case "list":
@@ -61,17 +74,38 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func printTree(s store.Store, args []string, w io.Writer) error {
-	var o render.Options
-	o.Reasons = true
-	session := ""
-	for _, a := range args {
-		switch a {
-		case "--ids":
-			o.IDs = true
-		default:
-			session = a
+func view(args []string) error {
+	s := store.Default()
+	pinned := ""
+	if len(args) > 0 {
+		id, err := s.Find(args[0])
+		if err != nil {
+			return err
 		}
+		pinned = id
+	}
+	dir, tm := claude.Dir(), tmux.Tmux{Bin: tmux.FindBin()}
+	active := func() (claude.Session, bool) {
+		pane, err := tm.ActivePane()
+		if err != nil {
+			return claude.Session{}, false
+		}
+		return claude.InPane(dir, pane)
+	}
+	p := tea.NewProgram(ui.New(ui.Deps{Store: s, Active: active, Now: time.Now}, pinned),
+		tea.WithAltScreen(), tea.WithFPS(20))
+	// Closing the iTerm2 pane sends SIGHUP; quit cleanly then.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGHUP)
+	go func() { <-sig; p.Quit() }()
+	_, err := p.Run()
+	return err
+}
+
+func printTree(s store.Store, args []string, w io.Writer) error {
+	session := ""
+	if len(args) > 0 {
+		session = args[0]
 	}
 	id, err := s.Find(session)
 	if err != nil {
@@ -81,8 +115,21 @@ func printTree(s store.Store, args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "%s · session %s · %d decisions\n%s\n\n%s\n",
-		folderName(t), short(id), countDecisions(t), render.Legend, render.Text(t, o))
+	fmt.Fprintf(w, "%s · session %s · %d decisions\n\n%s\n", folderName(t), short(id), countDecisions(t),
+		graph.Plain(graph.Layout(t, nil)))
+	var why []string
+	for _, n := range t.Nodes {
+		switch {
+		case n.Hidden:
+		case n.State == tree.Picked && n.Reason != "":
+			why = append(why, fmt.Sprintf("  %s — %s (%s)", t.Statement(n), n.Reason, n.By))
+		case n.State == tree.Dropped && n.DropReason != "":
+			why = append(why, fmt.Sprintf("  %s — dropped: %s", t.Statement(n), n.DropReason))
+		}
+	}
+	if len(why) > 0 {
+		fmt.Fprintf(w, "\nWhy\n%s\n", strings.Join(why, "\n"))
+	}
 	return nil
 }
 

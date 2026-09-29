@@ -26,8 +26,10 @@ const Instructions = `decision-tree draws the big choices of this session as a t
 Call record_decision when:
 - options for a project-level choice are laid out (leave picked empty),
 - one of them is picked (decision_id + picked),
-- a choice is made at once (question, options, and picked in one call),
+- a choice is made at once, even in passing ("we'll use Go"): topic, options, and picked in one call,
 - you or the user go back on an earlier choice (decision_id of that decision + the new picked).
+
+The topic is a short statement of what is being decided, not a question: "Database used", "Front end", "Who uses it". The tree shows it with the pick: "Database used: SQLite".
 
 Project-level means it changes what gets built or how:
 - a tool or technology ("Postgres, not SQLite")
@@ -43,12 +45,12 @@ Only the main conversation logs decisions, not sub-agents. Keep labels short (un
 
 const recordDescription = `Log a project-level decision in this session's decision tree. The server instructions say what counts.
 
-- New decision, still being weighed: question + options.
-- New decision, already made: question + options + picked + reason + by.
+- New decision, still being weighed: topic + options.
+- New decision, already made: topic + options + picked + reason + by.
 - Pick on an open decision: decision_id + picked + reason + by.
 - More options came up: decision_id + options.
 - Going back to an option that was not picked: decision_id of that earlier decision + picked + reason + by. The branch it replaces is marked dropped.
-- A new decision from an earlier point, dropping everything after it: question + options + after (the node id to grow from).
+- A new decision from an earlier point, dropping everything after it: topic + options + after (the node id to grow from).
 
 The reply gives the decision id, where "you are here" is, and the decisions still open.`
 
@@ -59,7 +61,7 @@ var alwaysLoad = mcp.Meta{"anthropic/alwaysLoad": true}
 
 // RecordInput is what Claude sends to record_decision. See tree.Call.
 type RecordInput struct {
-	Question   string   `json:"question,omitempty" jsonschema:"The decision as a short question. Needed for a new decision."`
+	Topic      string   `json:"topic,omitempty" jsonschema:"What is being decided, as a short statement, not a question: Database used. Needed for a new decision."`
 	Options    []string `json:"options,omitempty" jsonschema:"Every option talked about, the winner included. Short labels."`
 	Picked     string   `json:"picked,omitempty" jsonschema:"The option that won. Leave it out while still weighing."`
 	Reason     string   `json:"reason,omitempty" jsonschema:"One line on why picked won. Needed with picked."`
@@ -119,7 +121,7 @@ func (s *Server) record(_ context.Context, _ *mcp.CallToolRequest, in RecordInpu
 		s.fill(t, sess)
 		var err error
 		res, err = t.Record(tree.Call{
-			Question: in.Question, Options: in.Options, Picked: in.Picked,
+			Topic: in.Topic, Options: in.Options, Picked: in.Picked,
 			Reason: in.Reason, By: in.By, DecisionID: in.DecisionID, After: in.After,
 			At: s.Now(),
 		})
@@ -177,7 +179,7 @@ func Summary(t *tree.Tree, r tree.Result) string {
 func quoted(t *tree.Tree, ids []string) string {
 	var parts []string
 	for _, id := range ids {
-		parts = append(parts, fmt.Sprintf("%s %q", id, t.Decision(id).Question))
+		parts = append(parts, fmt.Sprintf("%s %q", id, t.Decision(id).Topic))
 	}
 	return strings.Join(parts, ", ")
 }

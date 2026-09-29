@@ -152,6 +152,6 @@ func (t *Tree) fix(what string, f func(w *Tree) error) error {
 }
 
 func sameDecision(a, b *Decision) bool {
-	return a.ID == b.ID && a.Question == b.Question && a.Parent == b.Parent &&
+	return a.ID == b.ID && a.Topic == b.Topic && a.Parent == b.Parent &&
 		a.At.Equal(b.At) && a.Hidden == b.Hidden && slices.Equal(a.Options, b.Options)
 }

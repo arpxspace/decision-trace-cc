@@ -16,7 +16,7 @@ func TestNewTree(t *testing.T) {
 
 func TestWeighThenPick(t *testing.T) {
 	tr := New("s1", t0)
-	r := rec(t, tr, Call{Question: "Which fix for slow search?", Options: []string{"Rewrite in Rust", "add a cache", "add a database index"}, At: at(1)})
+	r := rec(t, tr, Call{Topic: "Which fix for slow search?", Options: []string{"Rewrite in Rust", "add a cache", "add a database index"}, At: at(1)})
 	if r.DecisionID != "d1" || r.Here != RootID || !slices.Equal(r.Open, []string{"d1"}) {
 		t.Fatalf("result = %+v", r)
 	}
@@ -78,7 +78,7 @@ func TestGoBackToGreyOption(t *testing.T) {
 func TestAfterDropsTheBranch(t *testing.T) {
 	tr := crm(t)
 	// Back up to "add a database index" and ask a new question there.
-	r := rec(t, tr, Call{Question: "Which column order?", Options: []string{"date first", "company first"}, After: "n3", At: at(4)})
+	r := rec(t, tr, Call{Topic: "Which column order?", Options: []string{"date first", "company first"}, After: "n3", At: at(4)})
 	if r.Here != "n3" {
 		t.Fatalf("here = %s, want n3", r.Here)
 	}
@@ -98,14 +98,14 @@ func TestAfterDropsTheBranch(t *testing.T) {
 
 func TestAfterMustBeOnLiveBranch(t *testing.T) {
 	tr := crm(t)
-	recErr(t, tr, Call{Question: "Q", Options: []string{"a"}, After: "n2"}, "not on the live branch")
-	recErr(t, tr, Call{Question: "Q", Options: []string{"a"}, After: "n99"}, "there is no node")
+	recErr(t, tr, Call{Topic: "Q", Options: []string{"a"}, After: "n2"}, "not on the live branch")
+	recErr(t, tr, Call{Topic: "Q", Options: []string{"a"}, After: "n99"}, "there is no node")
 }
 
 func TestOpenDecisionsFloatDown(t *testing.T) {
 	tr := New("s1", t0)
-	rec(t, tr, Call{Question: "When to deploy?", Options: []string{"tonight", "now"}, At: at(1)})
-	r := rec(t, tr, Call{Question: "Which database?", Options: []string{"Postgres", "SQLite"}, Picked: "Postgres", Reason: "we need many writers", By: ByUser, At: at(2)})
+	rec(t, tr, Call{Topic: "When to deploy?", Options: []string{"tonight", "now"}, At: at(1)})
+	r := rec(t, tr, Call{Topic: "Which database?", Options: []string{"Postgres", "SQLite"}, Picked: "Postgres", Reason: "we need many writers", By: ByUser, At: at(2)})
 	if !slices.Equal(r.Open, []string{"d1"}) || len(r.Left) != 0 {
 		t.Fatalf("open = %v, left = %v; want [d1] open, none left (floating down is not being left behind)", r.Open, r.Left)
 	}
@@ -131,8 +131,8 @@ func TestOpenDecisionsFloatDown(t *testing.T) {
 
 func TestStrandedOpenDecision(t *testing.T) {
 	tr := New("s1", t0)
-	rec(t, tr, Call{Question: "Q1", Options: []string{"A", "B"}, Picked: "A", Reason: "r", By: ByUser, At: at(1)})
-	rec(t, tr, Call{Question: "Q2", Options: []string{"x", "y"}, At: at(2)})
+	rec(t, tr, Call{Topic: "Q1", Options: []string{"A", "B"}, Picked: "A", Reason: "r", By: ByUser, At: at(1)})
+	rec(t, tr, Call{Topic: "Q2", Options: []string{"x", "y"}, At: at(2)})
 	r := rec(t, tr, Call{DecisionID: "d1", Picked: "B", Reason: "A failed", By: ByUser, At: at(3)})
 	// Q2 was asked under A. A was given up, so Q2 is no longer open on the
 	// live branch, and Claude is told it was left behind.
@@ -153,7 +153,7 @@ func TestStrandedOpenDecision(t *testing.T) {
 
 func TestAddOptions(t *testing.T) {
 	tr := New("s1", t0)
-	rec(t, tr, Call{Question: "Q", Options: []string{"a", "b"}, At: at(1)})
+	rec(t, tr, Call{Topic: "Q", Options: []string{"a", "b"}, At: at(1)})
 	rec(t, tr, Call{DecisionID: "d1", Options: []string{" A ", "c"}, At: at(2)})
 	want(t, tr, `
 ● start ◀
@@ -188,11 +188,11 @@ func TestBadCalls(t *testing.T) {
 		call Call
 		want string
 	}{
-		{"no question", Call{Options: []string{"a"}}, "question is needed"},
-		{"no options", Call{Question: "Q", Options: []string{" ", ""}}, "options is needed"},
-		{"picked not an option", Call{Question: "Q", Options: []string{"a"}, Picked: "b", Reason: "r", By: ByUser}, "not one of the options"},
-		{"no reason", Call{Question: "Q", Options: []string{"a"}, Picked: "a", By: ByUser}, "reason is needed"},
-		{"bad by", Call{Question: "Q", Options: []string{"a"}, Picked: "a", Reason: "r", By: "me"}, "by is needed"},
+		{"no question", Call{Options: []string{"a"}}, "topic is needed"},
+		{"no options", Call{Topic: "Q", Options: []string{" ", ""}}, "options is needed"},
+		{"picked not an option", Call{Topic: "Q", Options: []string{"a"}, Picked: "b", Reason: "r", By: ByUser}, "not one of the options"},
+		{"no reason", Call{Topic: "Q", Options: []string{"a"}, Picked: "a", By: ByUser}, "reason is needed"},
+		{"bad by", Call{Topic: "Q", Options: []string{"a"}, Picked: "a", Reason: "r", By: "me"}, "by is needed"},
 		{"unknown decision", Call{DecisionID: "d9"}, "there is no decision"},
 		{"picked not in decision", Call{DecisionID: "d1", Picked: "zzz", Reason: "r", By: ByUser}, "not an option of d1"},
 	}

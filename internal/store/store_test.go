@@ -17,7 +17,7 @@ const id = "8533417c-1b9d-4c3c-a771-f0df5b76dae2"
 
 func addDecision(q string) func(*tree.Tree) error {
 	return func(t *tree.Tree) error {
-		_, err := t.Record(tree.Call{Question: q, Options: []string{"a", "b"}, At: time.Now()})
+		_, err := t.Record(tree.Call{Topic: q, Options: []string{"a", "b"}, At: time.Now()})
 		return err
 	}
 }
@@ -34,7 +34,7 @@ func TestUpdateThenLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SessionID != id || len(got.Decisions) != 1 || got.Decisions[0].Question != "Q1" {
+	if got.SessionID != id || len(got.Decisions) != 1 || got.Decisions[0].Topic != "Q1" {
 		t.Fatalf("loaded %+v", got)
 	}
 }

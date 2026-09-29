@@ -12,11 +12,11 @@ func example(t *testing.T) *tree.Tree {
 	tr := tree.New("s1", time.Now())
 	tr.Root().Label = "CRM search is slow"
 	calls := []tree.Call{
-		{Question: "Which fix?", Options: []string{"Rewrite in Rust", "add a cache", "add a database index"}},
+		{Topic: "Which fix?", Options: []string{"Rewrite in Rust", "add a cache", "add a database index"}},
 		{DecisionID: "d1", Picked: "add a database index", Reason: "fixes the query itself", By: tree.ByBoth},
-		{Question: "Which index?", Options: []string{"on email", "on company + date"}, Picked: "on company + date", Reason: "matches the search", By: tree.ByClaude},
+		{Topic: "Which index?", Options: []string{"on email", "on company + date"}, Picked: "on company + date", Reason: "matches the search", By: tree.ByClaude},
 		{DecisionID: "d1", Picked: "add a cache", Reason: "the index did not help", By: tree.ByUser},
-		{Question: "Cache for how long?", Options: []string{"5 minutes", "1 hour"}},
+		{Topic: "Cache for how long?", Options: []string{"5 minutes", "1 hour"}},
 	}
 	for _, c := range calls {
 		if _, err := tr.Record(c); err != nil {

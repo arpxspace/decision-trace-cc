@@ -7,7 +7,7 @@ import (
 
 // Call is one record_decision call from Claude. See PRD section 7.1.
 type Call struct {
-	Question   string   // needed for a new decision
+	Topic      string   // needed for a new decision
 	Options    []string // every option talked about, winner included
 	Picked     string   // the winner; "" while still weighing
 	Reason     string   // why Picked won; needed with Picked
@@ -72,8 +72,8 @@ func (t *Tree) record(c Call) (Result, error) {
 
 	var d *Decision
 	if c.DecisionID == "" {
-		if clean(c.Question) == "" {
-			return Result{}, errf("question is needed for a new decision.")
+		if clean(c.Topic) == "" {
+			return Result{}, errf(`topic is needed for a new decision: a short statement like "Database used".`)
 		}
 		if len(opts) == 0 {
 			return Result{}, errf("options is needed: list every option that was talked about.")
@@ -95,7 +95,7 @@ func (t *Tree) record(c Call) (Result, error) {
 			}
 			parent = n.ID
 		}
-		d = t.addDecision(clean(c.Question), parent, c.At)
+		d = t.addDecision(clean(c.Topic), parent, c.At)
 	} else {
 		d = t.Decision(c.DecisionID)
 		if d == nil {

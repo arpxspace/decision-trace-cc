@@ -268,31 +268,64 @@ go to a new, empty tree.
 
 ### 9.1 Layout
 
-Oldest at the top. It reads like a story. The split scrolls down on its own
-so "you are here" stays in view.
+Chosen by Amir on 29 Sep 2026, after seeing the plain indented text of
+`print` and finding it hard to read. Built in `internal/graph` (the layout)
+and `internal/ui` (the screen). Run it with `decision-tree view`.
 
-When you go back to a grey option, it becomes a new branch, like a git branch
-from an old commit:
-
-```
-●  start: CRM search is slow
-├─○  rewrite in Rust                 not picked
-├─╮
-│ ●  add a database index            picked first
-│ ●  index on company + date
-│ ✗  did not help, dropped
-│
-●  add a cache                       was grey, then picked
-●  cache results for 5 minutes   ◀ you are here
-```
-
-The bottom three lines show the node under the cursor:
+- **A git graph.** The main line runs down the left of the graph. Options
+  that were not picked hang off it as stubs. The stub forks from the node the
+  decision grows from, and the pick carries the line on, the same way git
+  draws a branch.
+- **Lines are statements, not questions.** A pick reads `Database used:
+  SQLite`: the decision's topic, then the pick. Stubs show just their label.
+- **Fits the pane.** The graph is centered left to right, oldest at the
+  top, flowing down. Nothing wraps; long labels end with "…". Room for
+  `◀` is kept on every line, so the graph does not shift sideways when "you
+  are here" moves.
+- **Going back** puts the dropped branch in its own lane (`├─╮`). A dropped
+  branch starts folded (`▸ 2 more`).
 
 ```
-──────────────────────────────────────────────
-which fix for slow CRM search? → add a cache · by both · 15:40
-the index did not fix the slow query; repeat searches are most of the load
+ notes-app · 4 decisions · following
+
+        ●  Notes app
+        │
+        ├─○  Postgres
+        ●  Database used: SQLite
+        │
+        ├─╮
+        │ ✗  Who uses it: Many users ▸ 2 more
+        ●  Who uses it: Just me
+        │
+        ├─○  Gone forever
+      › ●  Deleting a note: Trash bin      ◀
+        │
+        ┊  Deploy time: ?
+        ├─◌  Tonight
+        ╰─◌  Now
+ ──────────────────────────────────────────────
+  Deleting a note: Trash bin
+  Picked by you · 16:21
+  Why: you want to undo deletes
+ j/k move · space fold · . here · q quit
 ```
+
+The **details panel** is the bottom 3 lines. It always shows the node under
+the cursor:
+
+| Node | Line 1 | Line 2 | Line 3 |
+|------|--------|--------|--------|
+| picked | the statement | Picked by you · 16:21 | Why: … |
+| not picked | the statement | Not picked. SQLite won. | Why SQLite: … |
+| being weighed | the statement | Still being weighed. | Other options: … |
+| dropped | the statement | Dropped · 16:40 · first picked by you | Why dropped: … |
+| start | the session title | folder · session id | 3 decisions · started 16:02 |
+
+**Live updates, no flicker.** The view never clears the screen. Four times a
+second it checks the tree file's time, and it reads the file again only when
+it changed. Bubble Tea skips any frame that is the same as the last one.
+Measured on 29 Sep 2026: 0 bytes written in 3 idle seconds; one change wrote
+one frame, in place.
 
 ### 9.2 Which session it shows
 
@@ -301,20 +334,37 @@ split shows that session's tree. It finds the session the same way
 claude-sidebar does (`~/.claude/sessions/<pid>.json`, field `tmux`).
 
 If the pane you move to is not running Claude, the split keeps the last tree
-and dims the title. The top line always says which session and folder it shows.
+and says "this pane is not Claude". The top line always says which folder it
+shows, and whether it is following or pinned. `decision-tree view <session>`
+pins one session instead; `f` goes back to following.
+
+It asks tmux once a second: `list-clients` gives each client's pane, and the
+client used last wins. Then it finds the Claude session whose session file
+names that pane (skipping crashed Claudes whose files were left behind).
 
 ### 9.3 Keys
 
+Built now:
+
 | Key | Does |
 |-----|------|
-| `↑` `↓` / `j` `k` | Move the cursor between nodes |
+| `j` `k` / `↓` `↑` | Move the cursor between nodes |
+| `g` `G` | Jump to the top or bottom |
+| `space` / `enter` | Fold or unfold what grows from the node |
+| `h` `l` / `←` `→` | Fold / unfold |
+| `.` | Jump to "you are here". The cursor then rides along as new decisions come in. |
+| `f` | Go back to following the tmux pane |
+| `q` / `esc` | Quit |
+
+Still to build (steps 6 and 7):
+
+| Key | Does |
+|-----|------|
 | `p` | Mark the option under the cursor as picked (fix) |
 | `r` | Rename the node (fix) |
 | `d` | Delete the node and everything under it (fix) |
 | `u` | Undo your last fix |
 | `o` | Open the tree of a past session (a list, newest first) |
-| `f` | Go back to following the tmux pane |
-| `q` | Quit |
 
 Every fix locks the node (section 8).
 
@@ -327,7 +377,8 @@ Every fix locks the node (section 8).
 | `mcp` | Claude Code, once per session | The MCP server with the two tools |
 | `start` | You | Opens the split |
 | `toggle` | The tmux key | Opens or closes the split |
-| `print [session]` | You | Prints a tree as plain text, with reasons. No session = the newest tree. The first few characters of the id are enough, like a git hash. `--ids` adds ids. |
+| `view [session]` | You | The live view (section 9), in the current terminal. No session = follow the tmux pane in use. |
+| `print [session]` | You | Prints a tree as the same git graph, without colors, then a "Why" list. No session = the newest tree. The first few characters of the id are enough, like a git hash. |
 | `list` | You | Lists saved trees, newest first: when, session, folder, how many decisions, start label |
 
 - Same screen libraries as claude-sidebar: Bubble Tea and Lip Gloss.
@@ -418,7 +469,10 @@ Done on 29 Sep 2026. The full write-up is in `docs/findings.md`.
    - in the tree but not on the list = an extra (too small to log)
 
    Many misses → add the guards in 12.1. Many extras → tighten section 6.
-5. The split: drawing, following the tmux pane, the detail lines.
+5. ~~The split: drawing, following the tmux pane, the detail lines.~~ Done
+   29 Sep 2026 as `decision-tree view`, pulled ahead of step 4 at Amir's
+   request (the week of use keeps running). Not done yet: opening it as an
+   iTerm2 split by itself (`start`/`toggle`, step 7).
 6. Fixes and locks.
 7. Past trees (`o`), install, the tmux key.
 

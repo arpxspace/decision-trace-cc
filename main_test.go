@@ -39,7 +39,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range []map[string]any{
-		{"question": "Which fix?", "options": []string{"add a cache", "add a database index"}},
+		{"topic": "Fix", "options": []string{"add a cache", "add a database index"}},
 		{"decision_id": "d1", "picked": "add a database index", "reason": "fixes the query itself", "by": "both"},
 	} {
 		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "record_decision", Arguments: args})
@@ -52,9 +52,8 @@ func TestEndToEnd(t *testing.T) {
 	out := runBin(t, bin, env, "print", "8533")
 	for _, want := range []string{
 		"crm · session 8533417c · 1 decisions",
-		"● CRM search is slow",
-		"● add a database index ◀ — fixes the query itself (both)",
-		"○ add a cache",
+		"●  CRM search is slow\n│\n├─○  add a cache\n●  Fix: add a database index  ◀",
+		"Why\n  Fix: add a database index — fixes the query itself (both)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("print is missing %q:\n%s", want, out)

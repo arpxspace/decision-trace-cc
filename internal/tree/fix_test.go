@@ -40,7 +40,7 @@ func TestFixPick(t *testing.T) {
 	// Claude cannot move the pick away from Amir's choice.
 	recErr(t, tr, Call{DecisionID: "d1", Picked: "Rewrite in Rust", Reason: "r", By: ByClaude}, "fixed")
 	// But Claude can keep going from it.
-	rec(t, tr, Call{Question: "Cache for how long?", Options: []string{"5 minutes"}, Picked: "5 minutes", Reason: "r", By: ByClaude, At: at(6)})
+	rec(t, tr, Call{Topic: "Cache for how long?", Options: []string{"5 minutes"}, Picked: "5 minutes", Reason: "r", By: ByClaude, At: at(6)})
 }
 
 func TestFixPickPassesLocks(t *testing.T) {
@@ -99,7 +99,7 @@ func TestFixDeleteUnderHere(t *testing.T) {
 
 func TestFixDeleteLastOptionHidesDecision(t *testing.T) {
 	tr := New("s1", t0)
-	rec(t, tr, Call{Question: "Q", Options: []string{"a"}, At: at(1)})
+	rec(t, tr, Call{Topic: "Q", Options: []string{"a"}, At: at(1)})
 	if err := tr.FixDelete("n1"); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestUndoKeepsClaudesLaterWork(t *testing.T) {
 	if err := tr.FixRename("n4", "email index"); err != nil {
 		t.Fatal(err)
 	}
-	rec(t, tr, Call{Question: "Run it when?", Options: []string{"now"}, Picked: "now", Reason: "r", By: ByUser, At: at(5)})
+	rec(t, tr, Call{Topic: "Run it when?", Options: []string{"now"}, Picked: "now", Reason: "r", By: ByUser, At: at(5)})
 	if err := tr.Undo(); err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestUndoPickAfterClaudeMovedOn(t *testing.T) {
 	if err := tr.FixPick("n2", at(5)); err != nil {
 		t.Fatal(err)
 	}
-	rec(t, tr, Call{Question: "Cache for how long?", Options: []string{"5 minutes"}, Picked: "5 minutes", Reason: "r", By: ByClaude, At: at(6)})
+	rec(t, tr, Call{Topic: "Cache for how long?", Options: []string{"5 minutes"}, Picked: "5 minutes", Reason: "r", By: ByClaude, At: at(6)})
 	if err := tr.Undo(); err != nil {
 		t.Fatal(err)
 	}

@@ -113,7 +113,7 @@ func TestRecordAndShow(t *testing.T) {
 	}
 
 	got, isErr := call(t, cs, "record_decision", map[string]any{
-		"question": "Which database?", "options": []string{"Postgres", "SQLite"},
+		"topic": "Which database?", "options": []string{"Postgres", "SQLite"},
 	})
 	if isErr || got != `Saved as d1. You are here: title of s1 (n0). Still open: d1 "Which database?".` {
 		t.Fatalf("record = %q (error: %v)", got, isErr)
@@ -145,11 +145,11 @@ func TestRecordAndShow(t *testing.T) {
 
 // The live test on 29 Sep: after going back, Claude was told "Still open:
 // none", thought the front-end question was gone, and asked it again.
-func TestGoingBackNamesQuestionsLeftBehind(t *testing.T) {
+func TestGoingBackNamesTopicsLeftBehind(t *testing.T) {
 	_, cs := newFake(t)
 	for _, args := range []map[string]any{
-		{"question": "Which database?", "options": []string{"SQLite", "Postgres"}, "picked": "SQLite", "reason": "one user", "by": "user"},
-		{"question": "Which front end?", "options": []string{"HTML", "React"}},
+		{"topic": "Which database?", "options": []string{"SQLite", "Postgres"}, "picked": "SQLite", "reason": "one user", "by": "user"},
+		{"topic": "Which front end?", "options": []string{"HTML", "React"}},
 	} {
 		call(t, cs, "record_decision", args)
 	}
@@ -167,10 +167,10 @@ func TestGoingBackNamesQuestionsLeftBehind(t *testing.T) {
 func TestBadCallIsAToolError(t *testing.T) {
 	_, cs := newFake(t)
 	got, isErr := call(t, cs, "record_decision", map[string]any{"options": []string{"a"}})
-	if !isErr || !strings.Contains(got, "question is needed") {
+	if !isErr || !strings.Contains(got, "topic is needed") {
 		t.Fatalf("got %q (error: %v)", got, isErr)
 	}
-	got, isErr = call(t, cs, "record_decision", map[string]any{"question": "Q", "options": []string{"a"}, "picked": "a", "reason": "r", "by": "me"})
+	got, isErr = call(t, cs, "record_decision", map[string]any{"topic": "Q", "options": []string{"a"}, "picked": "a", "reason": "r", "by": "me"})
 	if !isErr {
 		t.Fatalf("by=me was accepted: %q", got)
 	}
@@ -178,15 +178,15 @@ func TestBadCallIsAToolError(t *testing.T) {
 
 func TestClearStartsANewTree(t *testing.T) {
 	f, cs := newFake(t)
-	call(t, cs, "record_decision", map[string]any{"question": "Q1", "options": []string{"a", "b"}})
+	call(t, cs, "record_decision", map[string]any{"topic": "Q1", "options": []string{"a", "b"}})
 	f.session.ID = "s2" // what /clear does; the server keeps running
-	got, _ := call(t, cs, "record_decision", map[string]any{"question": "Q2", "options": []string{"c"}})
+	got, _ := call(t, cs, "record_decision", map[string]any{"topic": "Q2", "options": []string{"c"}})
 	if !strings.HasPrefix(got, "Saved as d1.") {
 		t.Fatalf("after /clear, got %q; want a fresh tree starting at d1", got)
 	}
 	for id, want := range map[string]string{"s1": "Q1", "s2": "Q2"} {
 		tr, err := f.srv.Store.Load(id)
-		if err != nil || len(tr.Decisions) != 1 || tr.Decisions[0].Question != want {
+		if err != nil || len(tr.Decisions) != 1 || tr.Decisions[0].Topic != want {
 			t.Fatalf("tree %s = %+v, %v", id, tr, err)
 		}
 	}
@@ -195,7 +195,7 @@ func TestClearStartsANewTree(t *testing.T) {
 func TestUnknownSession(t *testing.T) {
 	f, cs := newFake(t)
 	f.err = errors.New("no session file")
-	got, isErr := call(t, cs, "record_decision", map[string]any{"question": "Q", "options": []string{"a"}})
+	got, isErr := call(t, cs, "record_decision", map[string]any{"topic": "Q", "options": []string{"a"}})
 	if !isErr || !strings.Contains(got, "cannot tell which session") {
 		t.Fatalf("got %q (error: %v)", got, isErr)
 	}

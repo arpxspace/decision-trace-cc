@@ -64,7 +64,7 @@ func Text(t *tree.Tree, o Options) string {
 			if o.IDs {
 				b.WriteString(d.ID + ": ")
 			}
-			b.WriteString(d.Question + "\n")
+			b.WriteString(d.Topic + "\n")
 			for _, id := range d.Options {
 				if opt := t.Node(id); !opt.Hidden {
 					node(opt, depth+2)

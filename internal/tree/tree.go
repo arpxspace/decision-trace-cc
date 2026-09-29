@@ -4,6 +4,7 @@
 package tree
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -44,14 +45,40 @@ type Node struct {
 	Hidden     bool      `json:"hidden,omitempty"` // Amir deleted it
 }
 
-// Decision is a question and its options. It grows from one node.
+// Decision is what is being decided and its options. It grows from one node.
 type Decision struct {
-	ID       string    `json:"id"`
-	Question string    `json:"question"`
-	Parent   string    `json:"parent"`  // the node it grows from
-	Options  []string  `json:"options"` // node ids, in the order they came up
-	At       time.Time `json:"at"`
-	Hidden   bool      `json:"hidden,omitempty"`
+	ID      string    `json:"id"`
+	Topic   string    `json:"topic"`   // a short statement, like "Database used"
+	Parent  string    `json:"parent"`  // the node it grows from
+	Options []string  `json:"options"` // node ids, in the order they came up
+	At      time.Time `json:"at"`
+	Hidden  bool      `json:"hidden,omitempty"`
+}
+
+// UnmarshalJSON also reads trees saved before 30 Sep 2026, which called the
+// topic "question".
+func (d *Decision) UnmarshalJSON(b []byte) error {
+	type plain Decision
+	var v struct {
+		plain
+		Question string `json:"question"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	*d = Decision(v.plain)
+	if d.Topic == "" {
+		d.Topic = v.Question
+	}
+	return nil
+}
+
+// Statement is how a picked or dropped option reads: "Database used: SQLite".
+func (t *Tree) Statement(n *Node) string {
+	if n.Decision == "" {
+		return n.Label
+	}
+	return t.Decision(n.Decision).Topic + ": " + n.Label
 }
 
 // Tree is one session's tree. Nothing is ever removed from it, only hidden,
@@ -201,8 +228,8 @@ func (t *Tree) dropBranch(p, reason string, at time.Time, fix bool) error {
 	return nil
 }
 
-func (t *Tree) addDecision(question, parent string, at time.Time) *Decision {
-	d := &Decision{ID: fmt.Sprintf("d%d", len(t.Decisions)+1), Question: question, Parent: parent, At: at}
+func (t *Tree) addDecision(topic, parent string, at time.Time) *Decision {
+	d := &Decision{ID: fmt.Sprintf("d%d", len(t.Decisions)+1), Topic: topic, Parent: parent, At: at}
 	t.Decisions = append(t.Decisions, d)
 	return d
 }

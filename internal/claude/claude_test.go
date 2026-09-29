@@ -46,6 +46,38 @@ func TestCallerFallsBackToVariable(t *testing.T) {
 	}
 }
 
+func TestInPane(t *testing.T) {
+	dir := t.TempDir()
+	me, parent := os.Getpid(), os.Getppid()
+	session := func(pid int, id, tmux string, updated int) {
+		write(t, filepath.Join(dir, "sessions", strconv.Itoa(pid)+".json"),
+			`{"pid":`+strconv.Itoa(pid)+`,"sessionId":"`+id+`","cwd":"/w","tmux":"`+tmux+`","updatedAt":`+strconv.Itoa(updated)+`}`)
+	}
+	session(me, "old", "main:@1.%5", 100)
+	session(parent, "new", "main:@1.%5", 200)  // same pane, newer file
+	session(999999, "dead", "main:@2.%6", 300) // no such process
+	write(t, filepath.Join(dir, "sessions", "123.abc.key"), "{}")
+
+	if s, ok := InPane(dir, "%5"); !ok || s.ID != "new" {
+		t.Fatalf("InPane(%%5) = %+v, %v; want the newer session", s, ok)
+	}
+	if s, ok := InPane(dir, "%6"); ok {
+		t.Fatalf("InPane(%%6) = %+v; a dead Claude should not count", s)
+	}
+	if _, ok := InPane(dir, ""); ok {
+		t.Fatal("empty pane matched a session")
+	}
+}
+
+func TestPaneID(t *testing.T) {
+	cases := map[string]string{"1:@1.%2": "%2", "my.proj:@12.%7": "%7", "": "", "dev:3.4": "", "junk": ""}
+	for in, want := range cases {
+		if got := (Session{Tmux: in}).PaneID(); got != want {
+			t.Errorf("PaneID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestSessionFileWithoutID(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "sessions", "42.json"), `{"pid":42}`)
