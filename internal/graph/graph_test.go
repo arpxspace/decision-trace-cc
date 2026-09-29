@@ -42,13 +42,13 @@ func TestMainLine(t *testing.T) {
 	want(t, Plain(Layout(notesApp(t), nil)), `
 ●  Notes app database choice
 │
-├─○  Postgres
+├─×  Postgres
 ●  Database used: SQLite
 │
-├─○  Multiple users
+├─×  Multiple users
 ●  Who uses it: Just me
 │
-├─○  Gone forever
+├─×  Gone forever
 ●  Deleting a note: Trash bin  ◀
 │
 ┊  Deploy time: ?
@@ -56,13 +56,14 @@ func TestMainLine(t *testing.T) {
 ╰─◌  Now`)
 }
 
-// crm: going back from the index to the cache, with a question still open.
+// crm: the index is set aside for the cache (drop_later), with a question
+// still open.
 func crm(t *testing.T) *tree.Tree {
 	return build(t, "CRM search is slow",
 		tree.Call{Topic: "Fix", Options: []string{"Rust rewrite", "Cache", "Index"}},
 		tree.Call{DecisionID: "d1", Picked: "Index", Reason: "fixes the query", By: tree.ByBoth},
 		tree.Call{Topic: "Index on", Options: []string{"email", "company + date"}, Picked: "company + date", Reason: "matches the search", By: tree.ByClaude},
-		tree.Call{DecisionID: "d1", Picked: "Cache", Reason: "the index did not help", By: tree.ByUser},
+		tree.Call{DecisionID: "d1", Picked: "Cache", Reason: "the index did not help", By: tree.ByUser, DropLater: true},
 		tree.Call{Topic: "Cache time", Options: []string{"5 minutes", "1 hour"}},
 	)
 }
@@ -71,11 +72,11 @@ func TestDroppedBranchGetsALane(t *testing.T) {
 	want(t, Plain(Layout(crm(t), nil)), `
 ●  CRM search is slow
 │
-├─○  Rust rewrite
+├─×  Rust rewrite
 ├─╮
-│ ✗  Fix: Index
+│ ↺  Fix: Index
 │ │
-│ ├─○  email
+│ ├─×  email
 │ ●  Index on: company + date
 ●  Fix: Cache  ◀
 │
@@ -91,9 +92,9 @@ func TestFolding(t *testing.T) {
 	want(t, Plain(Layout(tr, fold)), `
 ●  CRM search is slow
 │
-├─○  Rust rewrite
+├─×  Rust rewrite
 ├─╮
-│ ✗  Fix: Index ▸ 2 more
+│ ↺  Fix: Index ▸ 2 more
 ●  Fix: Cache  ◀
 │
 ┊  Cache time: ?
@@ -121,7 +122,7 @@ func TestDroppedLeafIsAStub(t *testing.T) {
 │
 ●  Language: Go  ◀
 │
-├─✗  CLI library: cobra
+├─↺  cobra
 │
 ┊  Config format: ?
 ├─◌  TOML
@@ -140,7 +141,7 @@ func TestLaneThatEndsTheGraph(t *testing.T) {
 ●  App  ◀
 │
 ╰─╮
-  ✗  Language: Go
+  ↺  Language: Go
   │
   ●  CLI library: cobra`)
 }

@@ -3,16 +3,17 @@
 //
 //	●  Notes app
 //	│
-//	├─○  Postgres                  not picked: a stub off the main line
-//	●  Database used: SQLite       picked: the main line goes on from here
+//	├─×  SQLite                    rejected: a stub off the main line
+//	●  Database: PostgreSQL        picked: the main line goes on from here
 //	│
-//	├─╮                            a dropped branch gets its own lane
-//	│ ✗  Front end: React
-//	●  Front end: HTML + htmx
+//	├─↺  REST                      picked, then changed later
+//	●  API: GraphQL
 //	│
-//	┊  Deploy time: ?              a decision still being weighed
-//	├─◌  Tonight
-//	╰─◌  Now
+//	├─╮                            a branch set aside gets its own lane
+//	│ ↺  Cache: Redis
+//	│ │
+//	│ ●  Cache time: 5 minutes
+//	●  Cache: none
 //
 // A stub hangs from the node its decision grows from, so the graph reads
 // like git: the fork is at the parent, and the pick carries the line on.
@@ -49,9 +50,9 @@ type Row struct {
 // Symbols for each state.
 var Symbols = map[tree.State]string{
 	tree.Picked:    "●",
-	tree.NotPicked: "○",
+	tree.NotPicked: "×", // rejected
 	tree.Weighing:  "◌",
-	tree.Dropped:   "✗",
+	tree.Dropped:   "↺", // picked, then changed later
 }
 
 // Layout draws the visible tree. folded says which nodes hide what grows
@@ -167,8 +168,8 @@ func (l *layout) symbol(n *tree.Node) string {
 }
 
 // text is how a node reads. A pick, or a node heading its own lane, reads
-// as a statement: "Database used: SQLite". A stub is just its label, since
-// the pick next to it names the topic.
+// as a statement: "Database: PostgreSQL". A stub is just its label, since
+// the pick right below it names the topic.
 func (l *layout) text(n *tree.Node, stub bool) string {
 	switch {
 	case n.ID == tree.RootID:
@@ -176,10 +177,10 @@ func (l *layout) text(n *tree.Node, stub bool) string {
 			return "start"
 		}
 		return n.Label
-	case n.State == tree.Picked || n.State == tree.Dropped || !stub:
-		return l.t.Statement(n)
+	case stub:
+		return n.Label
 	}
-	return n.Label
+	return l.t.Statement(n)
 }
 
 // count is how many visible nodes grow from id, all the way down.

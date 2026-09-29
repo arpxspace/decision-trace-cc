@@ -1,6 +1,8 @@
 # decision-tree — PRD
 
-Status: draft 3, 29 Sep 2026. Waiting for Amir to confirm. No code until then.
+Status: being built. Steps 1, 2, 3, and 5 are done; the week of real use
+(step 4) is running. Last updated 29 Sep 2026, after Amir's acceptance tests
+(section 16).
 
 ## 1. What it is
 
@@ -8,30 +10,30 @@ A second screen, like claude-sidebar, for one Claude Code session. It draws the
 big choices you and Claude make while you talk. It draws them as a tree that
 looks like a git graph.
 
-- A choice that got picked is a solid dot. The talk goes on from there.
-- Choices you talked about but did not pick stay on screen in grey.
-- Choices still being weighed show as hollow dots.
+- A choice that got picked is a solid dot `●`. The talk goes on from there.
+- Options that were talked about and rejected hang off to the side: `×`.
+- A pick that was changed later stays on screen, marked `↺`.
 
 ```
-●  start: CRM search is slow
-├─○  rewrite in Rust              not picked
-├─○  add a cache                  not picked
+●  Todo app
 │
-●  add a database index
-├─○  index on email               not picked
+├─×  SQLite                     rejected
+●  Database: PostgreSQL
 │
-●  index on company + date   ◀ you are here
-├─◌  run it tonight               being weighed
-└─◌  run it now                   being weighed
+├─↺  REST                       picked, then changed
+●  API: GraphQL
+│
+●  Auth: JWT  ◀                 you are here
 ```
 
-Claude builds the tree itself. It gets a new tool, `record_decision`. It calls
-the tool when options come up and again when one gets picked. The screen
-lives in its own iTerm2 split, next to tmux, like claude-sidebar does.
+Claude builds the tree itself. It gets a new tool, `record_decision`, and
+calls it once a decision is made or changed. Nothing is logged while options
+are only being discussed. The screen lives in its own iTerm2 split, next to
+tmux, like claude-sidebar does.
 
 ## 2. Goals
 
-1. **Watch live.** At a glance, see where the talk is right now and what is still open.
+1. **Watch live.** At a glance, see what has been decided so far, and where the talk is now.
 2. **Look back later.** Open an old session's tree and see why each choice was picked.
 3. **No extra work for you.** You talk as normal. Claude logs the choices.
 4. **Instant.** The tree changes the moment Claude calls the tool.
@@ -49,12 +51,14 @@ lives in its own iTerm2 split, next to tmux, like claude-sidebar does.
 
 | Word | What it means here |
 |------|--------------------|
-| **decision** | A choice about the project, with 2 or more options. "Postgres or SQLite?" |
-| **option** | One answer to a decision. "Postgres." |
+| **decision** | A choice about the project that was made, with the options that were talked about. |
+| **topic** | What a decision is about, as a short statement: "Database". The tree shows "Database: PostgreSQL". |
+| **option** | One answer to a decision. "PostgreSQL." |
 | **picked** `●` | The option that won. The talk goes on from it. |
-| **not picked** `○` | An option that was talked about and lost. Shown grey. |
-| **being weighed** `◌` | An option on the table. Nobody has picked yet. |
-| **dropped** `✗` | A picked option that was given up later. Its branch ends there. |
+| **rejected** `×` | An option that was talked about and lost. Shown grey. (In the code: `not_picked`.) |
+| **changed** `↺` | An option that was picked, then changed later. (In the code: `dropped`.) |
+| **set aside** | Decisions that depended on a changed pick, moved into their own lane (`drop_later`). |
+| **still open** `◌` | An option with no pick yet. Claude no longer logs these (section 6). They only show up in trees saved before 29 Sep 2026. |
 | **you are here** `◀` | The newest picked option on the live branch. |
 | **the tool** | `record_decision`, the tool Claude calls to change the tree. |
 | **MCP server** | A small program that gives Claude Code new tools. Ours gives Claude `record_decision` and `show_decision_tree`. Claude Code starts one copy for each session. |
@@ -66,10 +70,10 @@ lives in its own iTerm2 split, next to tmux, like claude-sidebar does.
 ```
   You and Claude talk in tmux
             │
-            │  options come up, or one gets picked
+            │  a decision is made, or changed
             ▼
   ┌────────────────────────────┐
-  │ Claude calls                │   record_decision(question, options,
+  │ Claude calls                │   record_decision(topic, options,
   │ record_decision             │                   picked, reason, by)
   └─────────────┬──────────────┘
                 ▼
@@ -90,24 +94,47 @@ lives in its own iTerm2 split, next to tmux, like claude-sidebar does.
 ## 6. What counts as a decision
 
 These rules go in the MCP server's instructions, so Claude reads them in
-every session.
+every session. They were rewritten on 29 Sep 2026 to pass Amir's acceptance
+tests (section 16).
 
-**Counts** — choices at the level of the project:
-- A tool or technology: "Postgres, not SQLite."
+**Log only once a decision is made.** Nothing is logged while options are
+only being discussed. "Redis, Postgres, or an in-memory cache are all
+possible" is not a decision (scenario 5). Made means one of these:
+
+| What happened | `by` |
+|---------------|------|
+| The user states it: "Use PostgreSQL rather than SQLite." | `user` |
+| Claude recommends, and the user agrees: "Agreed." | `both` |
+| The user leaves it to Claude, and Claude chooses | `claude` |
+
+**A suggestion is not a decision.** Claude says "Let's add Redis." The user
+says "No. Keep it simple and use Postgres." That is one decision: Redis
+rejected, PostgreSQL picked, by the user. Redis never shows as picked
+(scenario 3).
+
+**List the alternatives.** `options` holds every option that was talked
+about, so the tree shows what was rejected.
+
+**Changing a decision** ("Actually change this to GraphQL") is a call with
+that decision's id and the new pick. It changes in place (section 7.1).
+
+**Counts**: choices at the level of the project:
+- A tool or technology: "PostgreSQL, not SQLite."
 - An approach: "add an index, not a cache."
 - Scope: "leave login out of version 1."
 - A design direction: "oldest on top, not newest on top."
-- Going back: "the index did not help, let's try the cache."
 
-**Does not count** — small choices made along the way:
+**Does not count**: small choices made along the way:
 - Names: "call it `load_offers`."
 - Order of work: "read the config first."
 - Which command or tool Claude runs.
 
 **Many moments, one node.** Five turns about databases, plus one answer to a
-question with buttons (the AskUserQuestion tool), become one decision:
-"which database?" Claude logs it once when the options are laid out. It logs
-it again when one gets picked. It does not log each turn.
+question with buttons (the AskUserQuestion tool), become one decision. Claude
+logs it once, when one option wins.
+
+**The topic is a statement, not a question**: "Database", "API framework",
+"State storage".
 
 **When unsure, leave it out.** A tree with a missing node is easier to fix
 than a tree full of small stuff.
@@ -116,65 +143,92 @@ than a tree full of small stuff.
 asked. (Without this rule, the live test showed Claude saying "I added this
 to the decision tree" in every reply.)
 
-The exact wording Claude sees is `Instructions` in `internal/server/server.go`.
+The exact wording Claude sees is `Instructions` in `internal/server/server.go`
+(1,642 characters; the limit is 2,048).
+
+Before 29 Sep 2026 the rules also had Claude log options while they were
+still being weighed (`◌`). Scenario 5 ruled that out.
 
 ## 7. The tools
 
 ### 7.1 `record_decision`
 
-One tool does it all. What it does depends on what Claude fills in.
+One tool does it all. Every call is a decision that was made, or a change to
+one, so `picked`, `reason`, and `by` are always needed. A call without a pick
+is refused, so a discussion can never turn into a node by mistake.
 
 | Field | Needed? | What it is |
 |-------|---------|------------|
-| `question` | yes | "Which fix for slow CRM search?" |
-| `options` | yes | All options talked about, including the winner. |
-| `picked` | no | The winning option. Leave it empty while still weighing. |
-| `reason` | only with `picked` | One line: why this one won. |
-| `by` | only with `picked` | Who made the call: `user`, `claude`, or `both`. |
-| `decision_id` | no | Id of a decision already in the tree, to update it. |
-| `after` | no | Id of the node this decision grows from. Default: "you are here". |
+| `topic` | for a new decision | What was decided, as a short statement: "Database". |
+| `options` | for a new decision | Every option talked about, including the winner. |
+| `picked` | always | The winning option. |
+| `reason` | always | One line: why this one won. |
+| `by` | always | Who made the call: `user`, `claude`, or `both`. |
+| `decision_id` | to change a decision | Id of a decision already in the tree. |
+| `drop_later` | no | When changing a pick: also set aside the decisions made after it, because they depended on the old pick. |
+| `after` | no | For a new decision: the node it grows from. Everything past that node is set aside. |
 
 What each kind of call does:
 
 ```
-  No decision_id, no picked      → new decision, all options "being weighed"
-  No decision_id, with picked    → new decision, picked at once
-  decision_id, with picked       → that decision gets its pick;
-                                   the other options turn grey
-  decision_id of an OLD decision,
-    picked = a grey option       → going back: the old branch ends in ✗,
-                                   a new branch starts from this option
-  after = an older node          → the branch past that node ends in ✗,
-                                   the new decision grows from the older node
+  topic + options + picked      → new decision; the pick carries the line on,
+                                  the other options are rejected (×)
+  decision_id + a new picked    → a change in place: the old pick is marked ↺,
+                                  and the decisions made after it stay; they
+                                  move over to the new pick
+    ... + drop_later            → the old pick and the decisions after it are
+                                  set aside in their own lane, folded
+  after = an older node         → everything past that node is set aside, and
+                                  the new decision grows from that node
 ```
 
-Rules the code settled (step 2, `internal/tree`):
+A change in place, and the same change with `drop_later`:
 
-- **Choices on the table stay at the bottom.** A decision with no pick yet
-  moves down to "you are here" each time the talk moves on. When it gets
-  picked, it grows from "you are here". So the tree reads in the order things
-  were decided, not the order they came up.
-- **A given-up branch stays given up.** An open decision under a dropped
-  branch is no longer listed as open. Picking a `✗` option again is refused:
-  "start a new decision". Going back to a decision that sits inside a dropped
-  branch is refused the same way.
-- On an update (`decision_id`), `question` is ignored. New options join as
-  "being weighed", or as "not picked" if the decision was already made.
+```
+  in place (the default)          drop_later
+  ●  Todo app                      ●  Todo app
+  │                                │
+  ├─↺  REST                        ├─╮
+  ●  API: GraphQL                  │ ↺  API: REST ▸ 2 more
+  │                                ●  API: GraphQL  ◀
+  ├─×  sessions
+  ●  Auth: JWT  ◀
+```
+
+Use `drop_later` when the later decisions only made sense with the old pick.
+Example: after switching from an index to a cache, "which columns to index"
+no longer matters.
+
+Rules the code settled (`internal/tree`):
+
+- **Changes happen in place by default.** This came from scenario 4. The
+  first version set aside everything decided after a changed pick. Say you
+  picked REST, then made five more decisions, then switched to GraphQL: all
+  five would have been set aside.
+- **A pick can be changed back.** REST → GraphQL → REST works.
+- **A set-aside branch stays set aside.** Picking the head of a set-aside
+  branch again is refused ("start a new decision"). So is changing a decision
+  inside one.
+- **Picks come in the order they were made.** A new decision grows from
+  "you are here", so the main line reads in the order things were decided.
+- On a change (`decision_id`), `topic` is ignored. New options join as
+  rejected.
 - Option labels match without caring about capital letters or extra spaces.
 - A bad call changes nothing. Its error message says what to do instead.
 
 What the tool sends back to Claude, in one short line:
 
 ```
-Saved as d4. You are here: add a database index (n3). Still open: none.
+Saved as d4. You are here: GraphQL (n3). Still open: none.
 ```
 
-When going back leaves an unanswered question on the dropped branch, the
+When `drop_later` leaves an unanswered question in the set-aside branch, the
 reply names it, so Claude answers it instead of asking it again (found in
-the live test, `docs/findings.md` part 7):
+the live test, `docs/findings.md` part 7). Since picks are now required, this
+can only happen in trees saved before 29 Sep 2026:
 
 ```
-... Left behind on the dropped branch, still unanswered: d2 "Which front end?".
+... Left behind on the dropped branch, still unanswered: d2 "Front end".
 If one still matters, answer it with its decision_id (add new options if
 needed) and it moves here. Do not log it again as a new decision.
 ```
@@ -236,19 +290,22 @@ A decision, which holds its options and the node it grows from:
 ```json
 {
   "id": "d1",
-  "question": "Which fix for slow CRM search?",
+  "topic": "Speed fix",
   "parent": "n0",
   "options": ["n1", "n2", "n3"],
   "at": "2026-09-29T15:01:40Z"
 }
 ```
 
+Trees saved before 29 Sep 2026 call the topic `"question"`. They still load.
+
 The file also holds `here` (the "you are here" node id) and `fixes` (Amir's
 last 50 fixes, so `u` can undo them).
 
-- `state` is one of: `weighing`, `picked`, `not_picked`, `dropped`.
-- A dropped node keeps its `reason` (why it was picked) and gets a
-  `drop_reason` (why it was given up).
+- `state` is one of: `weighing` (still open), `picked`, `not_picked`
+  (rejected), `dropped` (changed).
+- A changed node keeps its `reason` (why it was picked) and gets a
+  `drop_reason` (why it was changed).
 - The top node, "start", gets its label from the session title in the chat
   file. If there is no title yet, it uses your first message, cut short.
 - Two programs write this file: the MCP server (Claude's calls) and the split
@@ -276,49 +333,54 @@ and `internal/ui` (the screen). Run it with `decision-tree view`.
   that were not picked hang off it as stubs. The stub forks from the node the
   decision grows from, and the pick carries the line on, the same way git
   draws a branch.
-- **Lines are statements, not questions.** A pick reads `Database used:
-  SQLite`: the decision's topic, then the pick. Stubs show just their label.
+- **Lines are statements, not questions.** A pick reads `Database:
+  PostgreSQL`: the decision's topic, then the pick. Stubs show just their
+  label: `× SQLite`, `↺ REST`.
+- **Symbols match Amir's acceptance tests:** `●` picked, `×` rejected, `↺`
+  changed later.
 - **Fits the pane.** The graph is centered left to right, oldest at the
-  top, flowing down. Nothing wraps; long labels end with "…". Room for
-  `◀` is kept on every line, so the graph does not shift sideways when "you
-  are here" moves.
-- **Going back** puts the dropped branch in its own lane (`├─╮`). A dropped
-  branch starts folded (`▸ 2 more`).
+  top, flowing down. Nothing wraps. Room for `◀` is kept on every line, so
+  the graph does not shift sideways when "you are here" moves.
+- **Too wide? Scroll sideways.** When the graph is wider than the pane, it
+  starts at the left edge instead of the middle. `←`/`→` scroll it, and a
+  cut end shows "…". The details panel always has the whole text, wrapped.
+- **A set-aside branch** (`drop_later`) gets its own lane (`├─╮`) and starts
+  folded (`▸ 2 more`).
+- **Smaller font:** a program cannot change it. In iTerm2, click the view's
+  pane and press Cmd −. That changes only that pane.
 
 ```
- notes-app · 4 decisions · following
+ todo-app · 4 decisions · following
 
-        ●  Notes app
+        ●  Todo app
         │
-        ├─○  Postgres
-        ●  Database used: SQLite
+        ├─×  SQLite
+        ●  Database: PostgreSQL
         │
-        ├─╮
-        │ ✗  Who uses it: Many users ▸ 2 more
-        ●  Who uses it: Just me
+        ●  API framework: FastAPI
         │
-        ├─○  Gone forever
-      › ●  Deleting a note: Trash bin      ◀
+        ├─↺  REST
+        ●  API: GraphQL
         │
-        ┊  Deploy time: ?
-        ├─◌  Tonight
-        ╰─◌  Now
+        ├─×  Redis
+      › ●  State storage: PostgreSQL  ◀
  ──────────────────────────────────────────────
-  Deleting a note: Trash bin
+  State storage: PostgreSQL
   Picked by you · 16:21
-  Why: you want to undo deletes
+  Why: keep the architecture simple; no extra
+  service to run
  j/k move · space fold · . here · q quit
 ```
 
-The **details panel** is the bottom 3 lines. It always shows the node under
-the cursor:
+The **details panel** is the bottom 4 lines. It always shows the node under
+the cursor. Long text wraps, so the whole reason can be read:
 
-| Node | Line 1 | Line 2 | Line 3 |
-|------|--------|--------|--------|
-| picked | the statement | Picked by you · 16:21 | Why: … |
-| not picked | the statement | Not picked. SQLite won. | Why SQLite: … |
-| being weighed | the statement | Still being weighed. | Other options: … |
-| dropped | the statement | Dropped · 16:40 · first picked by you | Why dropped: … |
+| Node | Line 1 | Line 2 | Lines 3–4 |
+|------|--------|--------|-----------|
+| picked | the statement | Picked by you / Picked by Claude / Agreed by you and Claude · 16:21 | Why: … |
+| rejected `×` | the statement | Rejected. PostgreSQL was picked. | Why PostgreSQL: … |
+| changed `↺` | the statement | Changed to GraphQL · 16:40 | Why: … |
+| still open `◌` | the statement | Still open. Nothing picked yet. | Other options: … |
 | start | the session title | folder · session id | 3 decisions · started 16:02 |
 
 **Live updates, no flicker.** The view never clears the screen. Four times a
@@ -351,7 +413,8 @@ Built now:
 | `j` `k` / `↓` `↑` | Move the cursor between nodes |
 | `g` `G` | Jump to the top or bottom |
 | `space` / `enter` | Fold or unfold what grows from the node |
-| `h` `l` / `←` `→` | Fold / unfold |
+| `←` `→` / `h` `l` | Scroll sideways, when the graph is wider than the pane |
+| `0` | Scroll back to the left edge |
 | `.` | Jump to "you are here". The cursor then rides along as new decisions come in. |
 | `f` | Go back to following the tmux pane |
 | `q` / `esc` | Quit |
@@ -408,6 +471,9 @@ Every fix locks the node (section 8).
 - **Drawing:** saved trees drawn to text and compared with saved pictures.
 - **End to end:** a fake MCP call, a fake session file, a private tmux server
   (the same method as claude-sidebar's `make e2e`). Never touches real tmux.
+- **Acceptance tests:** Amir's five scenarios (section 16), as Go tests
+  (`internal/server/server_test.go`, `TestScenario1…5`) and as live runs in
+  real Claude sessions.
 - **Real use:** one week of normal work (section 14, step 4). This is the test
   that matters most.
 
@@ -473,6 +539,9 @@ Done on 29 Sep 2026. The full write-up is in `docs/findings.md`.
    29 Sep 2026 as `decision-tree view`, pulled ahead of step 4 at Amir's
    request (the week of use keeps running). Not done yet: opening it as an
    iTerm2 split by itself (`start`/`toggle`, step 7).
+   On 29 Sep 2026 Amir's acceptance tests (section 16) changed the rules:
+   log only once made, change in place, and the symbols `×` and `↺`. Also
+   added: sideways scrolling and a wrapping details panel.
 6. Fixes and locks.
 7. Past trees (`o`), install, the tmux key.
 
@@ -493,6 +562,12 @@ does not matter.
 | 29 Sep 2026 | Only one guard: server instructions | Amir does not want to type `/decide`. The reminder line waits until the week of use shows it is needed |
 | 29 Sep 2026 | `/clear` starts a new, empty tree | `/clear` usually means a new topic (default; Amir can change it) |
 | 29 Sep 2026 | Sub-agent calls are allowed | The server cannot tell them apart, and they are rare (default; Amir can change it) |
+| 29 Sep 2026 | Git graph, fitted to the pane, details panel at the bottom | Amir found the indented text of `print` hard to read |
+| 29 Sep 2026 | Lines are statements (`topic: pick`), not questions | Amir: "Database used: SQLite" reads better |
+| 29 Sep 2026 | Log only once a decision is made; a call needs a pick | Acceptance scenario 5 |
+| 29 Sep 2026 | Changing a decision happens in place; `drop_later` sets later ones aside | Acceptance scenario 4; the old way lost later decisions |
+| 29 Sep 2026 | Symbols `×` rejected, `↺` changed | Amir's acceptance scenarios |
+| 29 Sep 2026 | Scroll sideways instead of cutting long text | Amir asked to read the full text |
 
 **The first plan** used a second AI to read the chat after every Claude reply.
 It ran through Codex CLI with `gpt-5.6-luna`. A test worked: 10 seconds and
@@ -500,3 +575,54 @@ about 13,000 tokens per reply. Amir switched to having Claude log decisions
 itself. With that switch, no chat text goes to OpenAI and nothing is used on
 the ChatGPT plan. The tree also updates at once. The cost is that Claude can
 forget, which section 7.3 guards against.
+
+## 16. Acceptance tests
+
+Given by Amir on 29 Sep 2026. Each one is a Go test, and each passed a live
+run in a real Claude session on the same day (`docs/findings.md`, part 8).
+The pictures are how `decision-tree print` draws the result.
+
+**Scenario 1: simple decision.** User: "Use PostgreSQL rather than SQLite."
+
+```
+●  Todo app
+│
+├─×  SQLite
+●  Database: PostgreSQL  ◀
+```
+
+**Scenario 2: Claude's recommendation accepted.** Claude: "I think FastAPI is
+the better choice here." User: "Agreed." Logged with `by: both`, which the
+details panel shows as "Agreed by you and Claude".
+
+```
+●  Todo app
+│
+●  API framework: FastAPI  ◀
+```
+
+**Scenario 3: recommendation rejected.** Claude: "Let's add Redis." User:
+"No. Keep the architecture simple and use Postgres." Redis is rejected (`×`),
+not changed (`↺`), because a suggestion was never a decision.
+
+```
+●  Todo app
+│
+├─×  Redis
+●  State storage: PostgreSQL  ◀
+```
+
+**Scenario 4: decision reversal.** Earlier: REST. Later, user: "Actually
+change this to GraphQL."
+
+```
+●  Todo app
+│
+├─↺  REST
+●  API: GraphQL  ◀
+```
+
+**Scenario 5: discussion without a decision.** Claude: "Redis, Postgres, or
+an in-memory cache are all possible." No node. The tool refuses a call with
+no pick, and in the live run Claude made no call at all.
+

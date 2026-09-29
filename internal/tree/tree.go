@@ -156,6 +156,16 @@ func (t *Tree) PickOf(d *Decision) *Node {
 	return nil
 }
 
+// hasChildren reports whether a visible decision grows from node id.
+func (t *Tree) hasChildren(id string) bool {
+	for _, d := range t.Decisions {
+		if d.Parent == id && !d.Hidden {
+			return true
+		}
+	}
+	return false
+}
+
 // decided reports whether one of d's options was ever picked.
 func (t *Tree) decided(d *Decision) bool {
 	for _, id := range d.Options {

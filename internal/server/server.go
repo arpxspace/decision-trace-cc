@@ -21,38 +21,33 @@ import (
 // Instructions are the rules from PRD section 6. Claude Code shows them in
 // every session, even before the tools are loaded. It cuts them off at
 // 2,048 characters, so they must stay shorter (a test checks).
-const Instructions = `decision-tree draws the big choices of this session as a tree. The user watches it in a side pane, so keep it right by calling record_decision.
+const Instructions = `decision-tree draws the choices made in this session as a tree. The user watches it in a side pane, so keep it right with record_decision.
 
-Call record_decision when:
-- options for a project-level choice are laid out (leave picked empty),
-- one of them is picked (decision_id + picked),
-- a choice is made at once, even in passing ("we'll use Go"): topic, options, and picked in one call,
-- you or the user go back on an earlier choice (decision_id of that decision + the new picked).
+Log a decision only once it is made. Never log options that are only being discussed ("Redis, Postgres, or an in-memory cache are all possible" is not a decision). Made means:
+- the user states it ("Use PostgreSQL rather than SQLite"): by user
+- you recommend and the user agrees ("Agreed"): by both
+- the user leaves it to you and you choose: by claude
+A suggestion is not a decision. If you suggest Redis and the user says "No, use Postgres", log one decision: options Redis and PostgreSQL, picked PostgreSQL, by user.
 
-The topic is a short statement of what is being decided, not a question: "Database used", "Front end", "Who uses it". The tree shows it with the pick: "Database used: SQLite".
+In options, list the alternatives that were talked about, so the tree shows what was rejected.
 
-Project-level means it changes what gets built or how:
-- a tool or technology ("Postgres, not SQLite")
-- an approach ("add an index, not a cache")
-- scope ("login is out of version 1")
-- a design direction ("oldest on top, not newest on top")
+Changing an earlier decision ("Actually change this to GraphQL"): call with that decision_id and the new picked, and add the new option to options if it is new. Set drop_later only if the decisions made after it depended on the old choice.
 
-Do not log small choices: names, the order of work, which command to run, or one step inside a bigger topic. Many turns about one topic, and answers to AskUserQuestion, are one decision: log it once when the options are laid out, and once when one wins. When unsure, leave it out.
+The topic is a short statement of what was decided, not a question: "Database", "API framework", "State storage". The tree shows "Database: PostgreSQL".
+
+Project-level only: a tool or technology, an approach, scope, a design direction. Not names, the order of work, or which command to run. Many turns about one topic, and answers to AskUserQuestion, are one decision. When unsure, leave it out.
 
 Log quietly. Do not mention the tree or this tool in your replies unless the user asks about it.
 
 Only the main conversation logs decisions, not sub-agents. Keep labels short (under 8 words). If you lose track of the ids, call show_decision_tree.`
 
-const recordDescription = `Log a project-level decision in this session's decision tree. The server instructions say what counts.
+const recordDescription = `Log a decision once it is made, or change one. The server instructions say what counts.
 
-- New decision, still being weighed: topic + options.
-- New decision, already made: topic + options + picked + reason + by.
-- Pick on an open decision: decision_id + picked + reason + by.
-- More options came up: decision_id + options.
-- Going back to an option that was not picked: decision_id of that earlier decision + picked + reason + by. The branch it replaces is marked dropped.
-- A new decision from an earlier point, dropping everything after it: topic + options + after (the node id to grow from).
+- New decision: topic + options (every option talked about, the winner included) + picked + reason + by.
+- Change an earlier decision: decision_id + picked + reason + by, plus options if the new pick was not an option before. The old pick is marked as changed. Decisions made after it stay, unless drop_later is set: then they are set aside with the old pick, for when they depended on it.
+- New decision from an earlier point, setting aside everything after that point: topic + options + picked + reason + by + after (the node id to grow from).
 
-The reply gives the decision id, where "you are here" is, and the decisions still open.`
+The reply gives the decision id and where "you are here" is.`
 
 const showDescription = `Show this session's decision tree as text, with decision ids (d1) and node ids (n1).`
 
@@ -61,13 +56,14 @@ var alwaysLoad = mcp.Meta{"anthropic/alwaysLoad": true}
 
 // RecordInput is what Claude sends to record_decision. See tree.Call.
 type RecordInput struct {
-	Topic      string   `json:"topic,omitempty" jsonschema:"What is being decided, as a short statement, not a question: Database used. Needed for a new decision."`
+	Topic      string   `json:"topic,omitempty" jsonschema:"What was decided, as a short statement, not a question: Database. Needed for a new decision."`
 	Options    []string `json:"options,omitempty" jsonschema:"Every option talked about, the winner included. Short labels."`
-	Picked     string   `json:"picked,omitempty" jsonschema:"The option that won. Leave it out while still weighing."`
-	Reason     string   `json:"reason,omitempty" jsonschema:"One line on why picked won. Needed with picked."`
-	By         string   `json:"by,omitempty" jsonschema:"Who made the call. Needed with picked."`
-	DecisionID string   `json:"decision_id,omitempty" jsonschema:"Id of a decision already in the tree (like d3), to update it."`
-	After      string   `json:"after,omitempty" jsonschema:"Only for a new decision: the node id (like n4) to grow it from. Everything after that node is marked dropped."`
+	Picked     string   `json:"picked" jsonschema:"The option that won. Only log a decision once one has won."`
+	Reason     string   `json:"reason" jsonschema:"One line on why picked won."`
+	By         string   `json:"by" jsonschema:"Who made the call: the user stated it, claude chose it, or both agreed."`
+	DecisionID string   `json:"decision_id,omitempty" jsonschema:"Id of a decision already in the tree (like d3), to change its pick."`
+	DropLater  bool     `json:"drop_later,omitempty" jsonschema:"When changing a pick: also set aside the decisions made after the old pick, because they depended on it."`
+	After      string   `json:"after,omitempty" jsonschema:"Only for a new decision: the node id (like n4) to grow it from. Everything after that node is set aside."`
 }
 
 // Server answers the tool calls.
@@ -112,6 +108,10 @@ func (s *Server) MCP(version string) *mcp.Server {
 }
 
 func (s *Server) record(_ context.Context, _ *mcp.CallToolRequest, in RecordInput) (*mcp.CallToolResult, any, error) {
+	if strings.TrimSpace(in.Picked) == "" {
+		// The schema already asks for it; this catches "picked": "".
+		return nil, nil, fmt.Errorf("picked is needed: only log a decision once one option has won. Do not log options that are only being discussed.")
+	}
 	sess, err := s.Caller()
 	if err != nil {
 		return nil, nil, fmt.Errorf("decision-tree cannot tell which session this is: %v", err)
@@ -122,7 +122,7 @@ func (s *Server) record(_ context.Context, _ *mcp.CallToolRequest, in RecordInpu
 		var err error
 		res, err = t.Record(tree.Call{
 			Topic: in.Topic, Options: in.Options, Picked: in.Picked,
-			Reason: in.Reason, By: in.By, DecisionID: in.DecisionID, After: in.After,
+			Reason: in.Reason, By: in.By, DecisionID: in.DecisionID, DropLater: in.DropLater, After: in.After,
 			At: s.Now(),
 		})
 		return err

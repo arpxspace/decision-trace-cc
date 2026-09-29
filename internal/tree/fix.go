@@ -30,7 +30,7 @@ func (t *Tree) FixPick(id string, at time.Time) error {
 		if x == nil || x.Hidden || x.Decision == "" {
 			return errf("%s is not an option.", id)
 		}
-		if err := w.pick(w.Decision(x.Decision), x, "", ByUser, at, true); err != nil {
+		if err := w.pick(w.Decision(x.Decision), x, "", ByUser, at, true, false); err != nil {
 			return err
 		}
 		x.Locked = true

@@ -13,6 +13,7 @@ type Call struct {
 	Reason     string   // why Picked won; needed with Picked
 	By         string   // who made the call; needed with Picked
 	DecisionID string   // update this decision instead of adding one
+	DropLater  bool     // when changing a pick: set aside what was decided after it
 	After      string   // grow a new decision from this node, not from "you are here"
 	At         time.Time
 }
@@ -128,7 +129,7 @@ func (t *Tree) record(c Call) (Result, error) {
 		if x == nil {
 			return Result{}, errf("picked %q is not an option of %s. Add it to options.", picked, d.ID)
 		}
-		if err := t.pick(d, x, clean(c.Reason), c.By, c.At, false); err != nil {
+		if err := t.pick(d, x, clean(c.Reason), c.By, c.At, false, c.DropLater); err != nil {
 			return Result{}, err
 		}
 	}
@@ -150,16 +151,18 @@ func (t *Tree) record(c Call) (Result, error) {
 	return res, nil
 }
 
-// pick makes x the winner of d and moves "you are here" to it.
+// pick makes x the winner of d.
 //
 // First pick: d moves down to "you are here", so the tree reads in the
 // order things were decided.
 //
-// Going back (d was decided before): the branch below d's parent is given
-// up, and a new branch starts from x.
+// Changing an earlier pick (d was decided before) happens in place: the old
+// pick is marked changed (Dropped), and the decisions made after it still
+// stand, so they move over to x. With dropLater, they are set aside instead,
+// in their own lane under the old pick, for when they depended on it.
 //
 // fix is true for Amir's own fixes, which may change locked nodes.
-func (t *Tree) pick(d *Decision, x *Node, reason, by string, at time.Time, fix bool) error {
+func (t *Tree) pick(d *Decision, x *Node, reason, by string, at time.Time, fix, dropLater bool) error {
 	if x.Hidden {
 		return errf("%q was deleted by the user. Leave it out.", x.Label)
 	}
@@ -173,24 +176,30 @@ func (t *Tree) pick(d *Decision, x *Node, reason, by string, at time.Time, fix b
 	if x.Locked && !fix {
 		return lockedErr(x)
 	}
-	if x.State == Dropped && !fix {
-		return errf("%q was dropped earlier. To try it again, start a new decision.", x.Label)
+	if x.State == Dropped && t.hasChildren(x.ID) && !fix {
+		return errf("%q heads a branch that was set aside. To try it again, start a new decision.", x.Label)
 	}
 
-	if !t.decided(d) {
+	switch {
+	case !t.decided(d):
 		d.Parent = t.Here
-	} else {
-		if !t.LivePath()[d.Parent] {
-			return errf("decision %s is on a dropped branch. Start a new decision instead.", d.ID)
-		}
-		if old != nil && old.Locked && !fix {
-			return lockedErr(old)
-		}
+	case !t.LivePath()[d.Parent]:
+		return errf("decision %s is on a branch that was set aside. Start a new decision instead.", d.ID)
+	case old != nil && old.Locked && !fix:
+		return lockedErr(old)
+	case dropLater:
 		if err := t.dropBranch(d.Parent, reason, at, fix); err != nil {
 			return err
 		}
 		if old != nil && old.State == Picked {
 			old.State, old.DropReason, old.At = Dropped, reason, at
+		}
+	case old != nil:
+		old.State, old.DropReason, old.At = Dropped, reason, at
+		for _, c := range t.Decisions {
+			if c.Parent == old.ID {
+				c.Parent = x.ID
+			}
 		}
 	}
 
@@ -204,7 +213,11 @@ func (t *Tree) pick(d *Decision, x *Node, reason, by string, at time.Time, fix b
 	if reason != "" {
 		x.Reason = reason
 	}
-	t.Here = x.ID
+	// "You are here" moves to x, unless it is already further down x's line
+	// (a change in place keeps it where it was).
+	if !t.LivePath()[x.ID] {
+		t.Here = x.ID
+	}
 	return nil
 }
 

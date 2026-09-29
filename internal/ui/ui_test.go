@@ -98,7 +98,7 @@ func TestDrawsTheGraphCentered(t *testing.T) {
 	m := send(New(f.deps(), ""), tea.WindowSizeMsg{Width: 60, Height: 24})
 
 	got := screen(m)
-	for _, want := range []string{"s1 · 2 decisions · following", "├─○  Postgres", "●  Database used: SQLite", "●  Who uses it: Just me"} {
+	for _, want := range []string{"s1 · 2 decisions · following", "├─×  Postgres", "●  Database used: SQLite", "●  Who uses it: Just me"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("screen is missing %q:\n%s", want, got)
 		}
@@ -129,7 +129,7 @@ func TestMoveAndDetails(t *testing.T) {
 	m := send(New(f.deps(), "s1"), tea.WindowSizeMsg{Width: 60, Height: 24})
 
 	m = send(m, key("k")) // up from SQLite to Postgres
-	line(t, m, "Not picked. SQLite won.")
+	line(t, m, "Rejected. SQLite was picked.")
 	line(t, m, "Why SQLite: a small app")
 	if l := line(t, m, "Postgres"); !strings.Contains(l, "›") {
 		t.Fatalf("cursor not on Postgres: %q", l)
@@ -159,7 +159,7 @@ func TestFoldAndUnfold(t *testing.T) {
 	if strings.Contains(screen(m), "SQLite") {
 		t.Fatal("folded nodes are still drawn")
 	}
-	m = send(m, key("l")) // open it again
+	m = send(m, key(" ")) // open it again
 	line(t, m, "Database used: SQLite")
 }
 
@@ -262,18 +262,80 @@ func TestEmptyStates(t *testing.T) {
 	line(t, m, "new · following")
 }
 
-func TestLongLabelsAreCutNotWrapped(t *testing.T) {
+func TestLongLabelsScrollSideways(t *testing.T) {
 	f := newFake(t)
-	f.record(t, "s1", tree.Call{Topic: "Database used", Options: []string{"SQLite with a very long explanation that goes on and on", "Postgres"}, Picked: "SQLite with a very long explanation that goes on and on", Reason: "r", By: tree.ByUser})
+	long := "SQLite with a very long explanation that goes on and on"
+	f.record(t, "s1", tree.Call{Topic: "Database used", Options: []string{long, "Postgres"}, Picked: long, Reason: "r", By: tree.ByUser})
 	m := send(New(f.deps(), "s1"), tea.WindowSizeMsg{Width: 40, Height: 20})
-	for _, l := range strings.Split(screen(m), "\n") {
-		if w := len([]rune(l)); w > 40 {
-			t.Errorf("line is %d wide, pane is 40: %q", w, l)
+	noWrap := func() {
+		t.Helper()
+		for _, l := range strings.Split(screen(m), "\n") {
+			if w := len([]rune(l)); w > 40 {
+				t.Errorf("line is %d wide, pane is 40: %q", w, l)
+			}
 		}
 	}
-	if l := line(t, m, "Database used: SQLite"); !strings.Contains(l, "…") || !strings.HasSuffix(l, "◀") {
-		t.Fatalf("long label should end in … and keep ◀: %q", l)
+	noWrap()
+	// Too wide: the row is cut at the edge with "…", and the help says how to scroll.
+	if l := line(t, m, "Database used: SQLite"); !strings.HasSuffix(l, "…") {
+		t.Fatalf("cut row should end in …: %q", l)
 	}
+	line(t, m, "←/→ scroll")
+
+	// Scroll right until the end of the label and ◀ show up.
+	for i := 0; i < 10; i++ {
+		m = send(m, key("right"))
+	}
+	noWrap()
+	if l := line(t, m, "goes on and on"); !strings.HasSuffix(l, "◀") || !strings.Contains(l, "…") {
+		t.Fatalf("after scrolling right, want the end of the label, ◀, and a … on the left: %q", l)
+	}
+	// Scrolling stops at the end: more presses change nothing.
+	before := screen(m)
+	m = send(m, key("l"))
+	if screen(m) != before {
+		t.Fatal("scrolled past the end of the graph")
+	}
+	// 0 jumps back to the left edge.
+	m = send(m, key("0"))
+	line(t, m, "Database used: SQLite")
+
+	// The details panel always has the whole label, wrapped.
+	line(t, m, "Database used: SQLite with a very")
+	line(t, m, "explanation that goes on and on")
+}
+
+func TestNarrowGraphDoesNotScroll(t *testing.T) {
+	f := newFake(t)
+	f.record(t, "s1", pickDB)
+	m := send(New(f.deps(), "s1"), tea.WindowSizeMsg{Width: 60, Height: 24})
+	before := screen(m)
+	m = send(m, key("right"), key("right"))
+	if screen(m) != before {
+		t.Fatal("a graph that fits should not move sideways")
+	}
+	if strings.Contains(before, "←/→ scroll") {
+		t.Fatal("help mentions scrolling, but there is nothing to scroll")
+	}
+}
+
+func TestDetailsWording(t *testing.T) {
+	f := newFake(t)
+	f.record(t, "s1",
+		tree.Call{Topic: "API framework", Options: []string{"FastAPI"}, Picked: "FastAPI", Reason: "recommended, and you agreed", By: tree.ByBoth},
+		tree.Call{Topic: "API", Options: []string{"REST"}, Picked: "REST", Reason: "simple", By: tree.ByUser},
+		tree.Call{DecisionID: "d2", Options: []string{"GraphQL"}, Picked: "GraphQL", Reason: "the client needs flexible queries", By: tree.ByUser},
+	)
+	m := send(New(f.deps(), "s1"), tea.WindowSizeMsg{Width: 70, Height: 24})
+	line(t, m, "├─↺  REST")
+	line(t, m, "●  API: GraphQL")
+
+	m = send(m, key("k")) // REST, changed later
+	line(t, m, "Changed to GraphQL · 16:30")
+	line(t, m, "Why: the client needs flexible queries")
+
+	m = send(m, key("k")) // FastAPI, agreed by both
+	line(t, m, "Agreed by you and Claude · 16:30")
 }
 
 func TestScrollKeepsCursorOnScreen(t *testing.T) {

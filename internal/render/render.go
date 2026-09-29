@@ -16,13 +16,13 @@ type Options struct {
 }
 
 // Legend explains the symbols.
-const Legend = "● picked  ○ not picked  ◌ being weighed  ✗ dropped  ◀ you are here"
+const Legend = "● picked  × rejected  ↺ changed later  ◌ still open  ◀ you are here"
 
 var symbol = map[tree.State]string{
 	tree.Picked:    "●",
-	tree.NotPicked: "○",
+	tree.NotPicked: "×",
 	tree.Weighing:  "◌",
-	tree.Dropped:   "✗",
+	tree.Dropped:   "↺",
 }
 
 // Label is a node's label, or "start" for an unnamed start node.

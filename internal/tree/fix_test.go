@@ -22,6 +22,8 @@ func TestFixRenameLocks(t *testing.T) {
 
 func TestFixPick(t *testing.T) {
 	tr := crm(t)
+	// Amir's fix is a change in place, like Claude's: what was decided after
+	// the old pick stays, and "you are here" stays where it was.
 	if err := tr.FixPick("n2", at(5)); err != nil {
 		t.Fatal(err)
 	}
@@ -29,11 +31,11 @@ func TestFixPick(t *testing.T) {
 ● start
   d1 Which fix for slow search?
     ○ Rewrite in Rust
-    ● add a cache ◀
-    ✗ add a database index
+    ● add a cache
       d2 Which index?
         ○ on email
-        ● on company + date`)
+        ● on company + date ◀
+    ✗ add a database index`)
 	if n := tr.Node("n2"); !n.Locked || n.By != ByUser {
 		t.Fatalf("n2 = %+v", n)
 	}
@@ -52,8 +54,8 @@ func TestFixPickPassesLocks(t *testing.T) {
 	if err := tr.FixPick("n1", at(6)); err != nil {
 		t.Fatal(err)
 	}
-	if tr.Here != "n1" || tr.Node("n2").State != Dropped {
-		t.Fatalf("here = %s, n2 = %+v", tr.Here, tr.Node("n2"))
+	if tr.Node("n1").State != Picked || tr.Node("n2").State != Dropped || tr.Decision("d2").Parent != "n1" || tr.Here != "n5" {
+		t.Fatalf("n1 = %+v, n2 = %+v, d2 grows from %s, here = %s", tr.Node("n1"), tr.Node("n2"), tr.Decision("d2").Parent, tr.Here)
 	}
 }
 
@@ -159,30 +161,51 @@ func TestUndoKeepsClaudesLaterWork(t *testing.T) {
 }
 
 func TestUndoPickAfterClaudeMovedOn(t *testing.T) {
-	tr := crm(t)
-	if err := tr.FixPick("n2", at(5)); err != nil {
+	tr := New("s1", t0)
+	rec(t, tr, Call{Topic: "Cache", Options: []string{"Redis", "in memory"}, Picked: "Redis", Reason: "r", By: ByClaude, At: at(1)})
+	if err := tr.FixPick("n2", at(2)); err != nil { // Amir: it was "in memory"
 		t.Fatal(err)
 	}
-	rec(t, tr, Call{Topic: "Cache for how long?", Options: []string{"5 minutes"}, Picked: "5 minutes", Reason: "r", By: ByClaude, At: at(6)})
+	rec(t, tr, Call{Topic: "Cache time", Options: []string{"5 minutes"}, Picked: "5 minutes", Reason: "r", By: ByClaude, At: at(3)})
 	if err := tr.Undo(); err != nil {
 		t.Fatal(err)
 	}
-	// The cache is grey again, so "you are here" goes back to where it was.
-	// Claude's question stays, under the grey cache.
-	if tr.Here != "n5" {
-		t.Fatalf("here = %s, want n5", tr.Here)
+	// "in memory" is grey again, so "you are here" can no longer sit below
+	// it. It goes back to where it was. Claude's decision stays, under the
+	// grey option.
+	if tr.Here != "n1" {
+		t.Fatalf("here = %s, want n1", tr.Here)
 	}
+	want(t, tr, `
+● start
+  d1 Cache
+    ● Redis ◀
+    ○ in memory
+      d2 Cache time
+        ● 5 minutes`)
+}
+
+func TestUndoChangeInPlaceKeepsLaterWork(t *testing.T) {
+	tr := crm(t)
+	if err := tr.FixPick("n2", at(5)); err != nil { // d2 moves over to the cache
+		t.Fatal(err)
+	}
+	rec(t, tr, Call{Topic: "Cache time", Options: []string{"5 minutes"}, Picked: "5 minutes", Reason: "r", By: ByClaude, At: at(6)})
+	if err := tr.Undo(); err != nil {
+		t.Fatal(err)
+	}
+	// d2 goes back under the index, and Claude's new decision with it.
 	want(t, tr, `
 ● start
   d1 Which fix for slow search?
     ○ Rewrite in Rust
     ○ add a cache
-      d3 Cache for how long?
-        ● 5 minutes
     ● add a database index
       d2 Which index?
         ○ on email
-        ● on company + date ◀`)
+        ● on company + date
+          d3 Cache time
+            ● 5 minutes ◀`)
 }
 
 func TestUndoListIsCapped(t *testing.T) {

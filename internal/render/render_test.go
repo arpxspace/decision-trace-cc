@@ -15,7 +15,7 @@ func example(t *testing.T) *tree.Tree {
 		{Topic: "Which fix?", Options: []string{"Rewrite in Rust", "add a cache", "add a database index"}},
 		{DecisionID: "d1", Picked: "add a database index", Reason: "fixes the query itself", By: tree.ByBoth},
 		{Topic: "Which index?", Options: []string{"on email", "on company + date"}, Picked: "on company + date", Reason: "matches the search", By: tree.ByClaude},
-		{DecisionID: "d1", Picked: "add a cache", Reason: "the index did not help", By: tree.ByUser},
+		{DecisionID: "d1", Picked: "add a cache", Reason: "the index did not help", By: tree.ByUser, DropLater: true},
 		{Topic: "Cache for how long?", Options: []string{"5 minutes", "1 hour"}},
 	}
 	for _, c := range calls {
@@ -30,14 +30,14 @@ func TestTextForAmir(t *testing.T) {
 	got := Text(example(t), Options{Reasons: true})
 	want := `● CRM search is slow
   Which fix?
-    ○ Rewrite in Rust
+    × Rewrite in Rust
     ● add a cache ◀ — the index did not help (user)
       Cache for how long?
         ◌ 5 minutes
         ◌ 1 hour
-    ✗ add a database index — dropped: the index did not help
+    ↺ add a database index — dropped: the index did not help
       Which index?
-        ○ on email
+        × on email
         ● on company + date — matches the search (claude)`
 	if got != want {
 		t.Fatalf("got\n%s\n\nwant\n%s", got, want)
@@ -56,9 +56,9 @@ func TestTextForClaude(t *testing.T) {
       d3: Cache for how long?
         ◌ n6 5 minutes
         ◌ n7 1 hour
-    ✗ n3 add a database index
+    ↺ n3 add a database index
       d2: Which index?
-        ○ n4 on email
+        × n4 on email
         ● n5 on company + date`
 	if got != want {
 		t.Fatalf("got\n%s\n\nwant\n%s", got, want)

@@ -165,11 +165,43 @@ not log it again"), and the rules say "Log quietly".
   run 2 did not. Both are fair calls. The week of real use will show how
   much this kind of thing varies.
 
+## 8. Live run of Amir's acceptance tests
+
+On 29 Sep 2026, after the rules changed to "log only once a decision is
+made" and "change in place" (PRD sections 6, 7.1, 16), each of Amir's five
+scenarios ran in its own real Claude session (Opus 5.5, private tmux server,
+trees saved to scratch folders). Every prompt began: "Separate from this
+repo: I'm planning a small todo web app. Don't write code or touch any
+files. Answer in one short sentence."
+
+| # | What was typed | Calls Claude made | Tree |
+|---|----------------|-------------------|------|
+| 1 | "Use PostgreSQL rather than SQLite." | 1: Database → PostgreSQL, by user | `× SQLite`, `● Database: PostgreSQL` |
+| 2 | "Flask or FastAPI…? Give me your recommendation." then "Agreed." | 1, only after "Agreed": API framework → FastAPI, by both | `× Flask`, `● …API framework: FastAPI` |
+| 3 | "I'm thinking of adding Redis… Pitch it to me." then "No. Keep the architecture simple and use Postgres." | 1, only after the "No": Session state storage → PostgreSQL, by user | `× Redis`, `× Signed cookie`, `● …: PostgreSQL` |
+| 4 | "For its API we'll use REST." then "Actually change this to GraphQL." | 2: API style → REST, by user; then d1 → GraphQL, by user | `↺ REST`, `● …API style: GraphQL` |
+| 5 | "What could I use for caching? Just list the options, don't pick one." | 0 | no tree |
+
+What this shows:
+
+- In scenarios 2 and 3, Claude logged nothing at the recommendation. It
+  logged once, after the user answered. So Redis shows as rejected (`×`),
+  not as changed (`↺`).
+- Claude listed other options that came up in its own reply (Flask in 2,
+  "signed cookie" in 3) as rejected. That follows the rule "list the
+  alternatives that were talked about".
+- No reply mentioned the tree. (One line matched a search for "logged", but
+  it was about users staying "logged in".)
+- Topics came out a little long ("Todo app API framework"), because every
+  prompt said "todo app". Worth watching during the week of real use.
+
 ## Side effects of the test
 
 - `git init` made this folder its own git project. Claude Code then asked
   again whether to trust the folder. The test answered "yes".
 - The tests left short chats in this folder's history (`7ef62275…`,
-  `8533417c…`, and the two live runs `7a089a1a…`, `648794e1…`), plus their
-  folders. All were deleted after the tests.
+  `8533417c…`, the two live runs `7a089a1a…`, `648794e1…`, the install
+  check `12106faf…`, and the five acceptance runs `0d0797b5…`, `9521ffd3…`,
+  `cc200491…`, `a0831e94…`, `ddfe5e81…`), plus their folders. All were
+  deleted after the tests, with Amir's OK.
 - The probe code lives in the session scratchpad, not in this project.

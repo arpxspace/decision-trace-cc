@@ -55,9 +55,46 @@ func TestPickedAtOnce(t *testing.T) {
         ● on company + date ◀`)
 }
 
-func TestGoBackToGreyOption(t *testing.T) {
+// Scenario 4 of Amir's acceptance tests: "Actually change this to GraphQL."
+// The change happens in place. What was decided after REST still stands, so
+// it moves over to GraphQL, and "you are here" stays where it was.
+func TestChangeInPlace(t *testing.T) {
+	tr := New("s1", t0)
+	rec(t, tr, Call{Topic: "API", Options: []string{"REST"}, Picked: "REST", Reason: "simple", By: ByBoth, At: at(1)})
+	rec(t, tr, Call{Topic: "Auth", Options: []string{"JWT", "sessions"}, Picked: "JWT", Reason: "stateless", By: ByClaude, At: at(2)})
+	r := rec(t, tr, Call{DecisionID: "d1", Options: []string{"GraphQL"}, Picked: "GraphQL", Reason: "the client needs flexible queries", By: ByUser, At: at(3)})
+	if r.Here != "n2" {
+		t.Fatalf("here = %s, want n2 (JWT still stands)", r.Here)
+	}
+	want(t, tr, `
+● start
+  d1 API
+    ✗ REST
+    ● GraphQL
+      d2 Auth
+        ● JWT ◀
+        ○ sessions`)
+	if n := tr.Node("n1"); n.DropReason != "the client needs flexible queries" || n.Reason != "simple" {
+		t.Fatalf("changed node = %+v (its pick reason must stay)", n)
+	}
+
+	// Changing back works too: REST → GraphQL → REST.
+	rec(t, tr, Call{DecisionID: "d1", Picked: "REST", Reason: "GraphQL was too much", By: ByUser, At: at(4)})
+	want(t, tr, `
+● start
+  d1 API
+    ● REST
+      d2 Auth
+        ● JWT ◀
+        ○ sessions
+    ✗ GraphQL`)
+}
+
+// When later decisions depended on the old pick, drop_later sets them aside
+// in the old pick's own lane.
+func TestChangeWithDropLater(t *testing.T) {
 	tr := crm(t)
-	r := rec(t, tr, Call{DecisionID: "d1", Picked: "add a cache", Reason: "the index did not help", By: ByBoth, At: at(4)})
+	r := rec(t, tr, Call{DecisionID: "d1", Picked: "add a cache", Reason: "the index did not help", By: ByBoth, DropLater: true, At: at(4)})
 	if r.Here != "n2" {
 		t.Fatalf("here = %s, want n2", r.Here)
 	}
@@ -133,9 +170,9 @@ func TestStrandedOpenDecision(t *testing.T) {
 	tr := New("s1", t0)
 	rec(t, tr, Call{Topic: "Q1", Options: []string{"A", "B"}, Picked: "A", Reason: "r", By: ByUser, At: at(1)})
 	rec(t, tr, Call{Topic: "Q2", Options: []string{"x", "y"}, At: at(2)})
-	r := rec(t, tr, Call{DecisionID: "d1", Picked: "B", Reason: "A failed", By: ByUser, At: at(3)})
-	// Q2 was asked under A. A was given up, so Q2 is no longer open on the
-	// live branch, and Claude is told it was left behind.
+	r := rec(t, tr, Call{DecisionID: "d1", Picked: "B", Reason: "A failed", By: ByUser, DropLater: true, At: at(3)})
+	// Q2 was asked under A. A was set aside with what followed it, so Q2 is
+	// no longer open on the live branch, and Claude is told it was left behind.
 	if len(r.Open) != 0 || !slices.Equal(r.Left, []string{"d2"}) {
 		t.Fatalf("open = %v, left = %v; want none open, d2 left", r.Open, r.Left)
 	}
@@ -201,17 +238,13 @@ func TestBadCalls(t *testing.T) {
 	}
 }
 
-func TestCannotPickDroppedOption(t *testing.T) {
+func TestCannotReviveASetAsideBranch(t *testing.T) {
 	tr := crm(t)
-	rec(t, tr, Call{DecisionID: "d1", Picked: "add a cache", Reason: "r", By: ByUser, At: at(4)})
-	recErr(t, tr, Call{DecisionID: "d1", Picked: "add a database index", Reason: "r", By: ByUser}, "dropped earlier")
-}
-
-func TestCannotGoBackInsideDroppedBranch(t *testing.T) {
-	tr := crm(t)
-	rec(t, tr, Call{DecisionID: "d1", Picked: "add a cache", Reason: "r", By: ByUser, At: at(4)})
-	// d2 lives under the dropped index branch.
-	recErr(t, tr, Call{DecisionID: "d2", Picked: "on email", Reason: "r", By: ByUser}, "dropped branch")
+	rec(t, tr, Call{DecisionID: "d1", Picked: "add a cache", Reason: "r", By: ByUser, DropLater: true, At: at(4)})
+	// The index heads a set-aside branch, with d2 still under it.
+	recErr(t, tr, Call{DecisionID: "d1", Picked: "add a database index", Reason: "r", By: ByUser}, "set aside")
+	// d2 itself lives in that branch.
+	recErr(t, tr, Call{DecisionID: "d2", Picked: "on email", Reason: "r", By: ByUser}, "set aside")
 }
 
 func TestJSONRoundTrip(t *testing.T) {
