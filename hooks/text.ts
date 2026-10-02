@@ -26,6 +26,15 @@ function cells(code: number): number {
   return 1
 }
 
+/**
+ * Text without control characters (line breaks kept), which Claude Code
+ * refuses to draw. Trees saved before they were dropped, and text from
+ * chats and errors, can hold them.
+ */
+export function printable(s: string): string {
+  return s.replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/g, '')
+}
+
 /** How many cells a character takes. */
 export function charWidth(ch: string): number {
   return cells(ch.codePointAt(0) ?? 0)

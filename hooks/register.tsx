@@ -16,11 +16,11 @@ import { create, cutOf, prepare, summary as planSummary } from './branch'
 import { answers, chatPath, memoryOf, promptInfo } from './chat'
 import { saveTreeCopy, take } from './checkpoint'
 import type { IO, Places } from './files'
-import { branchesOf, find, load as loadTree, places, short, treePath, update as updateTree } from './files'
+import { branchesOf, find, keepPrivate, load as loadTree, places, short, treePath, update as updateTree } from './files'
 import { layout, plain } from './graph'
 import { INSTRUCTIONS, TOOLS } from './rules'
 import { showText, summary } from './show'
-import { pickedBy, when } from './text'
+import { pickedBy, printable, when } from './text'
 import type { Call } from './tree'
 import { clean, node, record, ROOT, statement, TreeError } from './tree'
 
@@ -131,6 +131,7 @@ async function recordCall($: EngineInterface, input: Omit<Call, 'at'>, toolUseId
   }
   const x = io($)
   const p = await where($)
+  await keepPrivate(x, p)
   const session = await $.session.id()
   const cwd = await $.session.cwd()
   const at = new Date().toISOString()
@@ -287,6 +288,7 @@ async function makeBranch($: EngineInterface, ask: BranchAsk): Promise<void> {
   try {
     const x = io($)
     const p = await where($)
+    await keepPrivate(x, p)
     const planned = await prepare(x, p, ask.session, ask.node)
     const made = await create(x, p, planned, ask.focus, await $.session.id())
     const body = [`Session ${short(planned.session)}`, `Folder: ${planned.dir}`]
@@ -481,7 +483,7 @@ export const register: Register = (on, options) => {
     const text = data?.tree ? plain(layout(data.tree, undefined, data.branches)) : 'No decisions yet.'
     return (
       <Box flexDirection="column">
-        <Text>{error || text}</Text>
+        <Text>{printable(error || text)}</Text>
       </Box>
     )
   })

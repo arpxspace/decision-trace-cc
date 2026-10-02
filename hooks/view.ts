@@ -11,7 +11,7 @@ import type { Tree, ViewProps } from '../types'
 import type { Row } from './graph'
 import { defaultFolded, hasChildren, layout } from './graph'
 import { decision, node, pickOf, ROOT, statement } from './tree'
-import { charWidth, pickedBy, short, when, width, wrap } from './text'
+import { charWidth, pickedBy, printable, short, when, width, wrap } from './text'
 
 const DETAIL_LINES = 4 // the details panel's height, unless its text needs more
 const HERE_WIDTH = 3 // room for "  ◀" on every row, so the graph does not shift when "you are here" moves
@@ -312,7 +312,7 @@ function cut(line: Line, from: number, n: number): Line {
 }
 
 // Text from outside the view may hold line breaks; a line here never does.
-const say = (text: string, style: Style = PLAIN): Line => [{ text: text.replace(/\s*\n\s*/g, ' '), style }]
+const say = (text: string, style: Style = PLAIN): Line => [{ text: printable(text.replace(/\s*\n\s*/g, ' ')), style }]
 
 /** The top line: just "Decision". Another session's tree also says whose
  * it is, and an error shows after it. */
@@ -640,7 +640,7 @@ function draw(s: ClientSurface<Local>, line: Line): RenderElement {
         ...(bold ? { bold } : {}),
         ...(dim ? { dimColor: true } : {}),
         ...(underline ? { underline } : {}),
-        children: p.text,
+        children: printable(p.text),
       })
     }),
   })

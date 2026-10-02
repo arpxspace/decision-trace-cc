@@ -162,8 +162,6 @@ lane of their own.
 
 ### What is saved, and where
 
-Everything stays on your computer.
-
 | What | Where |
 |------|-------|
 | One tree per session | macOS and Linux: `~/.local/state/decision-trace/<session>.json` (or `$XDG_STATE_HOME/decision-trace`). Windows: `%LOCALAPPDATA%\decision-trace` |
@@ -171,6 +169,35 @@ Everything stays on your computer.
 | Claude's memory at each pick | A copy of the project's memory folder, in the state folder under `checkpoints/` |
 | The tree at each pick | A copy, so a branch starts with the tree as it was then |
 | Where the pick came from | The message you typed before it, what Claude said just before, and the id of the chat row that answers the call |
+
+### Privacy
+
+- **What leaves your computer.** decision-trace makes no network calls of
+  its own. The one exception is making a branch: the fork step resumes the
+  chat with `claude -p`, which sends the chat, up to the decision, to
+  Anthropic, as any resumed session does. It is one short Haiku reply.
+- **Who can read the files.** On macOS and Linux, the state folder is made
+  readable by you alone (`chmod 700`) before anything is written to it. On
+  Windows, `%LOCALAPPDATA%` is already your own.
+- **Your prompts are kept.** A tree saves the message you typed before each
+  decision, and what Claude said just before it. They stay in the tree file
+  after you delete the chat from Claude Code.
+- **Snapshots keep files git does not ignore, untracked ones included.** If
+  you never added a secret file (like `.env`) to `.gitignore`, a snapshot
+  saves a copy of it in `.git`, and the copy stays after you delete the
+  file. Normal `git push` does not send the hidden refs, but
+  `git push --mirror` does. Keep secrets in `.gitignore`.
+- **Branches copy what `.worktreeinclude` names**, like `.env`, into the
+  branch's folder in the state folder.
+
+To remove everything decision-trace saved for a repo, and then the trees,
+checkpoints, and branch folders (macOS and Linux):
+
+```sh
+git for-each-ref --format='%(refname)' refs/decision-trace | xargs -n 1 git update-ref -d
+git worktree list                        # remove any branch worktrees first: git worktree remove <path>
+rm -rf ~/.local/state/decision-trace
+```
 
 ### Making a branch
 
@@ -183,7 +210,8 @@ Everything stays on your computer.
                    (like .env) are copied in.
    2. the chat     claude -p --resume <session> --fork-session
                    --resume-session-at <row>: a new session, cut right after
-                   the decision. One short reply from Haiku.
+                   the decision. One short reply from Haiku, with no tools
+                   and no hooks.
    3. the memory   the saved copy, in the new folder's own memory folder
    4. the tree     the tree as it was then, marked "branch of <session>"
    5. the window   runs claude --resume <new session>: in a new window of
@@ -238,7 +266,7 @@ session. Otherwise it opens in a new tab of the terminal Claude Code runs in:
 |----------|-------|
 | iTerm2 | a new tab in the current window |
 | Terminal (macOS) | a new window, since Terminal cannot open a tab from a script |
-| Windows Terminal | a new tab, with `wt` |
+| Windows Terminal | a new tab, with `wt`. It starts `claude.exe` itself, so it needs the native install of Claude Code. |
 | WezTerm | a new tab, with `wezterm cli spawn` |
 | kitty | a new tab, with `kitty @ launch`. Turn on `allow_remote_control` in `kitty.conf` first. |
 | GNOME Terminal | a new tab |
@@ -264,7 +292,7 @@ iTerm2 or Terminal. Say yes, or the tab cannot open.
   graph) show the checkpoints, as `decision-trace checkpoint: …`. Normal
   `git log`, `git status`, `git branch`, and `git push` do not.
 - Checkpoints and branch folders stay until you remove them. There is no
-  cleanup command yet.
+  cleanup command yet; [Privacy](#privacy) shows how to remove them by hand.
 - Keys to fix the tree by hand (pick, rename, delete, undo) are planned. The
   rules for them are in `hooks/tree.ts`, but no key calls them yet.
 

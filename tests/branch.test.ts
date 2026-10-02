@@ -98,6 +98,8 @@ describe('branch', () => {
     expect(w.ran('cp', '-R', '/w/crm/.env', `${wt}/.env`)).toHaveLength(1)
     const fork = w.ran('claude', '-p')[0]
     expect(fork?.argv).toContain('--fork-session')
+    // The fork re-reads the whole chat, so it runs with no tools at all.
+    expect(fork?.argv.slice(fork.argv.indexOf('--tools'), fork.argv.indexOf('--tools') + 2)).toEqual(['--tools', ''])
     expect(fork?.argv.slice(fork.argv.indexOf('--resume-session-at'), fork.argv.indexOf('--resume-session-at') + 2)).toEqual(['--resume-session-at', 'row-7'])
     expect(fork?.init?.cwd).toBe(wt)
     expect(w.ran('cp', '-R', `${STATE}/checkpoints/s1/n1/memory`, '/home/u/.claude/projects/-branch/memory')).toHaveLength(1)
@@ -143,6 +145,7 @@ describe('branch', () => {
       const run = w.runs.find(r => r.argv[0] === first[0])
       expect(run?.argv.slice(0, first.length)).toEqual([...first])
       expect(run?.argv).toContain(plan.session)
+      expect(run?.argv).not.toContain('cmd') // nothing reads the folder names as commands
     }
   })
 

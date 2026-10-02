@@ -1,7 +1,7 @@
 // Trees on disk, and where things are, on each system.
 import { describe, expect, test } from 'claude-code/testing'
 
-import { branchesOf, copy, find, join, list, load, places, remove, terminalOf, treePath, update } from '../hooks/files'
+import { branchesOf, copy, find, join, keepPrivate, list, load, places, remove, terminalOf, treePath, update } from '../hooks/files'
 import { newTree, record } from '../hooks/tree'
 import { fail, HOME, World } from './fake'
 
@@ -111,5 +111,30 @@ describe('copying any kind of file', () => {
     expect(w.runs.at(-1)?.argv.slice(0, 4)).toEqual(['robocopy', 'C:\\r\\node_modules', 'C:\\w\\node_modules', '/E'])
     w.script = () => fail('ERROR 5: Access is denied.', 16)
     await expect(copy(w.io, win, 'C:\\r\\.env', 'C:\\w\\.env')).rejects.toThrow('robocopy could not copy')
+  })
+
+  test('Windows removes with PowerShell, which takes the path as plain text', async () => {
+    const win = places({ OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\R&D', LOCALAPPDATA: 'C:\\Users\\R&D\\AppData\\Local' })
+    const path = "C:\\Users\\R&D\\AppData\\Local\\decision-trace\\tmp\\it's"
+    const w = new World({ [path + '/index']: '' })
+    await remove(w.io, win, path)
+    expect(w.runs.at(-1)?.argv).toEqual([
+      'powershell', '-NoProfile', '-NonInteractive', '-Command',
+      "Remove-Item -LiteralPath 'C:\\Users\\R&D\\AppData\\Local\\decision-trace\\tmp\\it''s' -Recurse -Force",
+    ])
+    expect(w.ran('cmd')).toHaveLength(0)
+  })
+})
+
+describe('privacy', () => {
+  test('the state folder is made readable by this user alone, once', async () => {
+    const w = new World()
+    await keepPrivate(w.io, HOME)
+    await keepPrivate(w.io, HOME)
+    expect(w.runs.map(r => r.argv)).toEqual([['mkdir', '-p', HOME.state], ['chmod', '700', HOME.state]])
+    // On Windows, %LOCALAPPDATA% is already the user's own.
+    const win = new World()
+    await keepPrivate(win.io, places({ OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\ana', LOCALAPPDATA: 'C:\\L' }))
+    expect(win.runs).toHaveLength(0)
   })
 })

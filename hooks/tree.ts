@@ -52,8 +52,13 @@ export function newTree(sessionId: string, at: string): Tree {
 
 const clone = (t: Tree): Tree => JSON.parse(JSON.stringify(t)) as Tree
 
-/** Trims a label and squeezes its inner spaces. */
-export const clean = (s: string | undefined): string => (s ?? '').split(/\s+/).filter(Boolean).join(' ')
+/**
+ * Trims a label, squeezes its inner spaces, and drops control characters:
+ * Claude Code will not draw text that holds one, so one bad label would
+ * blank the whole pane.
+ */
+export const clean = (s: string | undefined): string =>
+  (s ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').split(/\s+/).filter(Boolean).join(' ')
 
 const sameLabel = (a: string, b: string) => clean(a).toLowerCase() === clean(b).toLowerCase()
 

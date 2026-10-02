@@ -89,6 +89,8 @@ describe('record_decision', () => {
 
     const t = w.json(treePath(HOME, 's1'))
     expect(t.folder).toBe('/w/crm')
+    // The state folder was made private before anything was written to it.
+    expect(w.runs[1]?.argv).toEqual(['chmod', '700', HOME.state])
     expect(t.nodes[2].checkpoint).toMatchObject({
       tool_use_id: 'toolu_1',
       repo: '/w/crm',

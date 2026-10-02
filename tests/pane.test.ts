@@ -205,6 +205,19 @@ describe('pane', () => {
     expect(await shown(ui)).toContain('› ●  Cache store: Redis  ◀')
   })
 
+  test('a tree saved with a control character in a label still draws', async ($, on) => {
+    const t = crm()
+    t.nodes[1]!.label = 'Rust\u001b]2;PWNED\u0007 rewrite'
+    session(on, t)
+    await $.session.start(start)
+    await $.command.run(command())
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await ui.resize({ columns: 60, rows: 24, in: 'tree' })
+    const text = await shown(ui)
+    expect(text).toContain('├─×  Rust]2;PWNED rewrite')
+    expect(text).not.toContain('\u001b')
+  })
+
   test('a session with no decisions says so', async ($, on) => {
     session(on, null)
     await $.session.start(start)

@@ -271,8 +271,10 @@ async function include(io: IO, p: Places, repo: string, wt: string): Promise<str
 /**
  * Makes the branch's chat with Claude Code's own fork: a new session, cut
  * right after the decision, in the branch's folder. Hooks and MCP servers
- * are off for this one short run. --resume-session-at is a flag Claude Code
- * does not list in its help; it keeps the chat up to that row.
+ * are off for this one short run, and so are all tools: it only has to say
+ * "Branch ready.", and the chat it re-reads may hold text that asks for
+ * more. --resume-session-at is a flag Claude Code does not list in its
+ * help; it keeps the chat up to that row.
  */
 async function fork(io: IO, p: Places, plan: Plan): Promise<void> {
   let note =
@@ -285,7 +287,7 @@ async function fork(io: IO, p: Places, plan: Plan): Promise<void> {
   }
   note += ' Reply with only: Branch ready.'
   const ran = await io.run(
-    ['claude', '-p', '--model', 'haiku', '--strict-mcp-config', '--settings', '{"disableAllHooks":true}',
+    ['claude', '-p', '--model', 'haiku', '--tools', '', '--strict-mcp-config', '--settings', '{"disableAllHooks":true}',
       '--resume', plan.parent.session_id, '--fork-session', '--resume-session-at', plan.cut.uuid,
       '--session-id', plan.session, note],
     { cwd: plan.dir, timeoutMs: 180_000 },
@@ -364,8 +366,9 @@ async function openTab(io: IO, p: Places, dir: string, name: string, args: strin
       break
     case 'windows-terminal':
       where = 'Windows Terminal tab'
-      // wt reads a ";" as the start of another command.
-      argv = ['wt', '-w', '0', 'new-tab', '--title', name, '-d', dir, 'cmd', '/k', ...args.map(a => a.replace(/;/g, '\\;'))]
+      // claude starts on its own, not through cmd, which would read & and |
+      // in a folder name as commands. wt reads a ";" as another command.
+      argv = ['wt', '-w', '0', 'new-tab', '--title', name, '-d', dir, ...args.map(a => a.replace(/;/g, '\\;'))]
       break
     case 'wezterm':
       where = 'WezTerm tab'

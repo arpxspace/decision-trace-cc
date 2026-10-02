@@ -248,6 +248,13 @@ describe('record', () => {
     s.recErr({ decision_id: 'd1', picked: 'zzz', reason: 'r', by: 'user' }, 'not an option of d1')
   })
 
+  test('control characters never get into a tree', () => {
+    const s = new Story()
+    s.rec({ topic: 'DB\u001b]2;title\u0007', options: ['Post\u0000gres', 'SQLite'], picked: 'Post\u0000gres', reason: 'many\u009bwriters', by: 'user' })
+    expect(s.t.decisions[0]?.topic).toBe('DB ]2;title')
+    expect(node(s.t, 'n1')).toMatchObject({ label: 'Post gres', reason: 'many writers' })
+  })
+
   test('a set-aside branch cannot be picked again', () => {
     const s = crm()
     s.rec({ decision_id: 'd1', picked: 'add a cache', reason: 'r', by: 'user', drop_later: true })

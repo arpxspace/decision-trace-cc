@@ -146,16 +146,34 @@ export async function copy(io: IO, p: Places, src: string, dst: string): Promise
 
 /** Removes a file or folder this program made itself. */
 export async function remove(io: IO, p: Places, path: string): Promise<void> {
-  const what = await io.stat(path)
-  if (!what) {
+  if (!(await io.stat(path))) {
     return
   }
-  const argv = !p.windows
-    ? ['rm', '-rf', path]
-    : what.kind === 'dir'
-      ? ['cmd', '/c', 'rmdir', '/s', '/q', path]
-      : ['cmd', '/c', 'del', '/f', '/q', path]
+  // On Windows, PowerShell takes the path as plain text (-LiteralPath, in
+  // single quotes). cmd would read & or | in a path as another command.
+  const argv = p.windows
+    ? ['powershell', '-NoProfile', '-NonInteractive', '-Command', `Remove-Item -LiteralPath '${path.replace(/'/g, "''")}' -Recurse -Force`]
+    : ['rm', '-rf', path]
   await io.run(argv)
+}
+
+// The state folders made private in this process.
+const madePrivate = new Set<string>()
+
+/**
+ * Makes the state folder readable by this user alone, before the first
+ * write: trees hold the user's prompts and Claude's reasons, and
+ * checkpoints hold Claude's memory and copied files like .env. On Windows,
+ * %LOCALAPPDATA% is already the user's own.
+ */
+export async function keepPrivate(io: IO, p: Places): Promise<void> {
+  if (p.windows || madePrivate.has(p.state)) {
+    return
+  }
+  await io.run(['mkdir', '-p', p.state])
+  if ((await io.run(['chmod', '700', p.state])).exitCode === 0) {
+    madePrivate.add(p.state)
+  }
 }
 
 // ---- trees on disk ----
