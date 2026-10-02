@@ -1,0 +1,16 @@
+{
+  "name": "decision-trace",
+  "owner": {
+    "name": "Amir Panahi"
+  },
+  "metadata": {
+    "description": "decision-trace: every decision you and Claude Code settle on, drawn as a tree beside the chat."
+  },
+  "plugins": [
+    {
+      "name": "decision-trace",
+      "source": "./",
+      "description": "Every decision you and Claude Code settle on, drawn as a tree beside the chat. Branch from any one to try another path."
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "decision-trace",
+  "version": "0.2.0",
+  "description": "Every decision you and Claude Code settle on, drawn as a tree beside the chat. Branch from any one to try another path.",
+  "author": { "name": "Amir Panahi" },
+  "repository": "https://github.com/arpxspace/decision-trace-cc",
+  "license": "MIT",
+  "userConfig": {
+    "openAtStart": {
+      "type": "boolean",
+      "title": "Open the tree pane at start",
+      "description": "Open the decision tree pane when a session starts (it shows once the terminal is wide enough)",
+      "default": true
+    }
+  },
+  "types": "./types/index.d.ts"
+}
