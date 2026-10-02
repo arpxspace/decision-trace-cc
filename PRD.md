@@ -1,8 +1,8 @@
 # decision-tree — PRD
 
 Status: being built. Steps 1, 2, 3, and 5 are done; the week of real use
-(step 4) is running. Last updated 2 Oct 2026, when the tree moved into a
-pane inside Claude Code (section 19).
+(step 4) is running. Last updated 2 Oct 2026, when the old window and the
+MCP server were removed (section 20).
 
 ## 1. What it is
 
@@ -28,8 +28,8 @@ looks like a git graph.
 
 Claude builds the tree itself. It gets a new tool, `record_decision`, and
 calls it once a decision is made or changed. Nothing is logged while options
-are only being discussed. The screen lives in its own iTerm2 split, next to
-tmux, like claude-sidebar does.
+are only being discussed. The screen is a pane inside Claude Code, beside the
+chat (section 19). Until 2 Oct 2026 it was an iTerm2 split of its own.
 
 ## 2. Goals
 
@@ -61,14 +61,15 @@ tmux, like claude-sidebar does.
 | **still open** `◌` | An option with no pick yet. Claude no longer logs these (section 6). They only show up in trees saved before 29 Sep 2026. |
 | **you are here** `◀` | The newest picked option on the live branch. |
 | **the tool** | `record_decision`, the tool Claude calls to change the tree. |
-| **MCP server** | A small program that gives Claude Code new tools. Ours gives Claude `record_decision` and `show_decision_tree`. Claude Code starts one copy for each session. |
+| **MCP server** | A small program that gives Claude Code new tools. Ours gave Claude `record_decision` and `show_decision_tree` until 2 Oct 2026, when the mod took over (sections 18 and 20). |
+| **the mod** | The Claude Code plugin in `mod/`. It gives Claude the two tools and draws the pane (sections 18 and 19). |
 | **tree file** | The file on disk that holds one session's tree. |
 | **split** | The iTerm2 pane that shows the tree. |
 
 ## 5. How it works
 
 ```
-  You and Claude talk in tmux
+  You and Claude talk in Claude Code
             │
             │  a decision is made, or changed
             ▼
@@ -78,8 +79,8 @@ tmux, like claude-sidebar does.
   └─────────────┬──────────────┘
                 ▼
   ┌────────────────────────────┐
-  │ MCP server                  │   checks the call, writes the tree file,
-  │ `decision-tree mcp`         │   tells Claude the node id and "you are here"
+  │ the mod runs                │   checks the call, writes the tree file,
+  │ `decision-tree record`      │   tells Claude the node id and "you are here"
   └─────────────┬──────────────┘
                 ▼
   ┌────────────────────────────┐
@@ -87,14 +88,14 @@ tmux, like claude-sidebar does.
   └─────────────┬──────────────┘
                 ▼
   ┌────────────────────────────┐
-  │ the split (TUI)             │   sees the file change, redraws
+  │ the pane in Claude Code     │   sees the file change, redraws
   └────────────────────────────┘
 ```
 
 ## 6. What counts as a decision
 
-These rules go in the MCP server's instructions, so Claude reads them in
-every session. They were rewritten on 29 Sep 2026 to pass Amir's acceptance
+The mod adds these rules to Claude's system prompt, so Claude reads them in
+every session. (Until 2 Oct 2026 they were the MCP server's instructions.) They were rewritten on 29 Sep 2026 to pass Amir's acceptance
 tests (section 16).
 
 **Log only once a decision is made.** Nothing is logged while options are
@@ -308,20 +309,23 @@ last 50 fixes, so `u` can undo them).
   `drop_reason` (why it was changed).
 - The top node, "start", gets its label from the session title in the chat
   file. If there is no title yet, it uses your first message, cut short.
-- Two programs write this file: the MCP server (Claude's calls) and the split
-  (your fixes). Each one locks the file, reads it fresh, changes it, and saves
-  it. So neither one wipes out the other's change. A file that cannot be read
-  is left alone, never overwritten.
+- The Go program writes this file when the mod runs it. It locks the file,
+  reads it fresh, changes it, and saves it, so two writers never wipe out
+  each other's change. A file that cannot be read is left alone, never
+  overwritten.
 - A node you delete stays in the file, hidden and locked. So Claude cannot add
   it back.
 
-**Which tree a call goes to.** At every tool call, the MCP server reads
-`~/.claude/sessions/<its parent pid>.json` to get the session id. It does
-not use the `CLAUDE_CODE_SESSION_ID` variable, because that goes stale after
-`/clear` (`docs/findings.md`, parts 1 and 4). So after `/clear`, new calls
-go to a new, empty tree.
+**Which tree a call goes to.** At every tool call, the mod asks Claude Code
+for the session id and passes it to the Go program (section 18). After
+`/clear` the session gets a new id, so new calls go to a new, empty tree.
 
-## 9. The split
+## 9. The split (removed 2 Oct 2026)
+
+This was the old window, `decision-tree view`, in an iTerm2 split of its
+own. The pane in section 19 replaced it, and its code was removed on 2 Oct
+2026 (section 20). This section stays as the record of how it worked. The
+pane works the same way, except where section 19 says.
 
 ### 9.1 Layout
 
@@ -437,36 +441,26 @@ Every fix locks the node (section 8).
 
 | Command | Who runs it | Does |
 |---------|-------------|------|
-| `mcp` | Claude Code, once per session | The MCP server with the two tools |
-| `start` | You | Opens the split |
-| `toggle` | The tmux key | Opens or closes the split |
-| `view [session]` | You | The live view (section 9), in the current terminal. No session = follow the tmux pane in use. |
 | `print [session]` | You | Prints a tree as the same git graph, without colors, then a "Why" list. No session = the newest tree. The first few characters of the id are enough, like a git hash. |
 | `list` | You | Lists saved trees, newest first: when, session, folder, how many decisions, start label |
-| `branch <session> <node>` | You (the view's `b` key later) | Starts a new Claude session from a decision, in a new tmux window: chat, code, memory, and tree as they were then. Shows what it will start with and asks first; `--yes` skips the question, `--focus` jumps to it, `--name` names it |
+| `branch <session> <node>` | You, or the pane's `b` key | Starts a new Claude session from a decision, in a new tmux window: chat, code, memory, and tree as they were then. Shows what it will start with and asks first; `--yes` skips the question, `--focus` jumps to it, `--name` names it |
 | `source <session> [node]` | You | Where each pick came from in the chat (your message, what Claude said before), where a branch would cut, and what its checkpoint saved |
 | `record --session <id> [--cwd <dir>] [--tool-use-id <id>]` | The mod | Saves one `record_decision` call, read as JSON from stdin, and prints the reply (section 18) |
 | `show --session <id>` | The mod | Prints the tree as `show_decision_tree` does |
 | `describe` | The mod | Prints the rules and both tools as JSON |
 | `data --session <id>` | The mod's pane | Prints a tree, the branches made from it, and its file's path as JSON (section 19). `source … --json` and `branch … --json --plan` / `--yes` do the same for the pane's `enter` and `b` |
 
-- Same screen libraries as claude-sidebar: Bubble Tea and Lip Gloss.
-  The MCP server uses the official MCP library for Go
-  (`github.com/modelcontextprotocol/go-sdk`, v1.8.0).
-- Each tool also carries `_meta: {"anthropic/alwaysLoad": true}`, so it
-  stays loaded even if the server's settings forget `alwaysLoad`.
-- Reuse claude-sidebar's code for tmux, the session files, and the iTerm2 split.
-  Copy it for now, and share it later if both tools grow.
-- Install to `~/.local/bin/decision-tree`.
+- The Go program uses one library from outside Go:
+  `github.com/google/jsonschema-go`, which builds `record_decision`'s input
+  schema from `server.RecordInput`.
+- Install to `~/.local/bin/decision-tree` with `make install`.
 - Hook up to Claude Code, for all projects:
-  - Add the MCP server, with its tools always loaded:
-    `claude mcp add-json --scope user decision-tree '{"command":"/Users/amirpanahi/.local/bin/decision-tree","args":["mcp"],"alwaysLoad":true}'`
+  - Load the mod in every session: in `~/.claude/settings.json`, set
+    `"env": {"CLAUDE_CODE_PLUGIN_DIRS": "<this repo>/mod"}`.
   - In `~/.claude/settings.json`: allow both tools, so Claude does not ask
     you first each time.
-- A tmux key (next to claude-sidebar's `prefix + a`) runs `decision-tree toggle`.
-  The exact key is picked at build time.
-- Config file `~/.config/decision-tree/config.toml`: a list of folders where
-  the tools are turned off.
+- Not built: a config file `~/.config/decision-tree/config.toml` with a
+  list of folders where the tools are turned off.
 
 ## 11. Tests
 
@@ -475,8 +469,11 @@ Every fix locks the node (section 8).
 - **Tool checks:** bad calls get clear errors. Examples: `picked` is not one
   of the `options`, or a `decision_id` does not exist.
 - **Drawing:** saved trees drawn to text and compared with saved pictures.
-- **End to end:** a fake MCP call, a fake session file, a private tmux server
-  (the same method as claude-sidebar's `make e2e`). Never touches real tmux.
+- **End to end:** the real program, run the way the mod runs it: a
+  `record_decision` call as JSON on stdin to `record`, then `print`,
+  `source`, `data`, and `branch --plan`, in a scratch git repo. Never
+  touches real tmux.
+- **The mod:** `claude plugin test mod` (sections 18.2 and 19.5).
 - **Acceptance tests:** Amir's five scenarios (section 16), as Go tests
   (`internal/server/server_test.go`, `TestScenario1…5`) and as live runs in
   real Claude sessions.
@@ -543,16 +540,18 @@ Done on 29 Sep 2026. The full write-up is in `docs/findings.md`.
    Many misses → add the guards in 12.1. Many extras → tighten section 6.
 5. ~~The split: drawing, following the tmux pane, the detail lines.~~ Done
    29 Sep 2026 as `decision-tree view`, pulled ahead of step 4 at Amir's
-   request (the week of use keeps running). Not done yet: opening it as an
-   iTerm2 split by itself (`start`/`toggle`, step 7).
+   request (the week of use keeps running). Replaced by the pane (step 10)
+   and removed on 2 Oct 2026, so `start`/`toggle` will not be built.
    On 29 Sep 2026 Amir's acceptance tests (section 16) changed the rules:
    log only once made, change in place, and the symbols `×` and `↺`. Also
    added: sideways scrolling and a wrapping details panel.
-6. Fixes and locks.
-7. Past trees (`o`), install, the tmux key.
+6. Fixes and locks, now as keys in the pane. The tree logic for them is in
+   `internal/tree/fix.go`; nothing calls it yet.
+7. Past trees (`o`) in the pane.
 8. Branch from a decision (section 17). Research done 29 Sep 2026.
 9. ~~The Claude Code mod (section 18).~~ Done and switched on 2 Oct 2026.
 10. ~~The tree inside Claude Code (section 19).~~ Done 2 Oct 2026.
+11. ~~Remove the old window and the MCP server (section 20).~~ Done 2 Oct 2026.
 
 Step 4 is the real test. If Claude does not log good decisions, the screen
 does not matter.
@@ -582,6 +581,7 @@ does not matter.
 | 2 Oct 2026 | The tree moves into a pane inside Claude Code | Amir wants the same screen and keys inside Claude Code, not in a window of its own (section 19) |
 | 2 Oct 2026 | Only the screen moves to TypeScript; Go stays the brain | The Go tree logic, file locks, checkpoints, and branching are tested; a mod has no Node to lock a file with |
 | 2 Oct 2026 | In the pane, long text wraps instead of scrolling sideways | The pane is narrow; Amir wants to read the whole text without scrolling |
+| 2 Oct 2026 | Remove the old window and the MCP server, with no way back | Less code to look after (section 20) |
 
 **The first plan** used a second AI to read the chat after every Claude reply.
 It ran through Codex CLI with `gpt-5.6-luna`. A test worked: 10 seconds and
@@ -832,7 +832,8 @@ Still to come: `[` `]` to step between sibling branches.
 Claude Code can now load mods: plugins of small TypeScript hooks that run
 inside Claude Code itself. On 2 Oct 2026 Amir chose to move Claude's side of
 decision-tree into one, and keep everything else in Go. The mod lives in
-`mod/`. It replaces the MCP server; it does not replace the view.
+`mod/`. It replaces the MCP server; it does not replace the view. (Section
+19 replaced the view too, the same day.)
 
 ```
   Claude calls record_decision
@@ -899,7 +900,8 @@ both tools, from the mod:
 3. Load the mod in every session: in `~/.claude/settings.json`, set
    `"env": {"CLAUDE_CODE_PLUGIN_DIRS": "<this repo>/mod"}`.
 
-To go back: remove that line and add the MCP server again (section 10).
+There is no way back now: the MCP server's code was removed on 2 Oct 2026
+(section 20).
 
 ### 18.4 What a mod could add later
 
@@ -1022,8 +1024,46 @@ Two rules of mods found while building, for next time:
 
 ### 19.6 Not done yet
 
-- The Go view still works, so nothing is lost while the pane proves itself.
-  Remove it, with `start`/`toggle` and the tmux key from step 7, once it has.
+- The Go view was removed the same day (section 20).
 - Making a branch from the pane was tested with a fake Go program, not live,
   because a live branch opens a real tmux window. The Go side is the same
   code the Go view's `b` key runs.
+
+## 20. Removing the old window and the MCP server
+
+Decided by Amir on 2 Oct 2026: remove the Go code the mod no longer uses,
+for less code to look after. He wants no way back to the old window or the
+MCP server.
+
+What was removed:
+
+| Removed | What replaced it |
+|---------|------------------|
+| `internal/ui` and the `view` command (the old window) | The pane (section 19) |
+| The `mcp` command and the MCP parts of `internal/server` | The mod (section 18) |
+| `claude.Caller` (found the session from the parent process) | The mod passes the session id |
+| `claude.InPane`, `tmux.ActivePane` (followed the tmux pane in use) | The pane belongs to its own session |
+| `graph.DefaultFolded` | The pane's own copy, in `mod/hooks/graph.ts` |
+| 31 outside libraries, Bubble Tea, Lip Gloss, and the MCP library among them | Nothing: one is left, `jsonschema-go` |
+
+What the Go program still does, because the mod runs it:
+
+```
+ the mod                  the Go program
+ session start  ───────▶  describe   the rules and the 2 tool definitions
+ record_decision ──────▶  record     the tree logic, the file lock, the checkpoint
+ show_decision_tree ───▶  show       the tree as text for Claude
+ the pane       ───────▶  data       the tree and its branches
+ enter          ───────▶  source     where a pick came from in the chat
+ b, then y      ───────▶  branch     a worktree, the chat fork, a tmux window
+```
+
+`print` and `list` stay too, for reading trees in a terminal during the week
+of real use (step 4).
+
+The tests moved with the code. The end-to-end test and the five acceptance
+scenarios now call `record` and `Server.Record` the way the mod does,
+instead of through an MCP client. The MCP client also checked each call
+against the tool's schema; the tree logic already checks the same things
+(`picked`, `reason`, and `by` are needed; `by` is `user`, `claude`, or
+`both`).

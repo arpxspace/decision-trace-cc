@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // Dir is ~/.claude, or $CLAUDE_CONFIG_DIR if set.
@@ -27,20 +26,10 @@ func Dir() string {
 
 // Session is what ~/.claude/sessions/<pid>.json says about a running Claude.
 type Session struct {
-	PID       int    `json:"pid"`
-	ID        string `json:"sessionId"`
-	Cwd       string `json:"cwd"`
-	Tmux      string `json:"tmux"`      // "session:@window.%pane"
-	UpdatedAt int64  `json:"updatedAt"` // unix milliseconds
-}
-
-// PaneID is the tmux pane the session runs in, like "%23", or "".
-func (s Session) PaneID() string {
-	i := strings.LastIndex(s.Tmux, ".")
-	if i < 0 || !strings.HasPrefix(s.Tmux[i+1:], "%") {
-		return ""
-	}
-	return s.Tmux[i+1:]
+	PID  int    `json:"pid"`
+	ID   string `json:"sessionId"`
+	Cwd  string `json:"cwd"`
+	Tmux string `json:"tmux"` // "session:@window.%pane"
 }
 
 // ReadAll reads every session file. Files it cannot read are skipped: a
@@ -63,32 +52,6 @@ func ReadAll(dir string) []Session {
 	return all
 }
 
-// InPane finds the running Claude session in a tmux pane. A crashed Claude
-// leaves its file behind, so dead processes are skipped, and if two files
-// still claim the pane, the newest wins.
-func InPane(dir, pane string) (Session, bool) {
-	var best Session
-	found := false
-	for _, s := range ReadAll(dir) {
-		if pane == "" || s.PaneID() != pane || !alive(s.PID) {
-			continue
-		}
-		if !found || s.UpdatedAt > best.UpdatedAt {
-			best, found = s, true
-		}
-	}
-	return best, found
-}
-
-// alive reports whether a process exists. Signal 0 checks without sending.
-func alive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
-}
-
 // SessionOf reads the session file of the Claude process pid. The file
 // changes when the user runs /clear, so read it fresh each time.
 func SessionOf(dir string, pid int) (Session, error) {
@@ -104,22 +67,6 @@ func SessionOf(dir string, pid int) (Session, error) {
 		return Session{}, fmt.Errorf("session file for pid %d has no sessionId", pid)
 	}
 	return s, nil
-}
-
-// Caller finds the session of the Claude process that started this
-// program. Claude Code starts MCP servers directly, so that is our parent.
-// If the parent has no session file, CLAUDE_CODE_SESSION_ID is used. It is
-// set when the server starts, so it goes stale after /clear, but it is
-// better than nothing.
-func Caller(dir string) (Session, error) {
-	s, err := SessionOf(dir, os.Getppid())
-	if err == nil {
-		return s, nil
-	}
-	if id := os.Getenv("CLAUDE_CODE_SESSION_ID"); id != "" {
-		return Session{ID: id, Cwd: os.Getenv("CLAUDE_PROJECT_DIR")}, nil
-	}
-	return Session{}, fmt.Errorf("not started by Claude Code (%v)", err)
 }
 
 // ChatPath finds a session's chat file: ~/.claude/projects/<folder>/<id>.jsonl.

@@ -87,8 +87,8 @@ func TestDroppedBranchGetsALane(t *testing.T) {
 
 func TestFolding(t *testing.T) {
 	tr := crm(t)
-	// A dropped branch starts folded.
-	fold := func(id string) bool { return DefaultFolded(tr, id) }
+	// Folding the dropped index (n3) hides what grew from it.
+	fold := func(id string) bool { return id == "n3" }
 	want(t, Plain(Layout(tr, fold, nil)), `
 ●  CRM search is slow
 │
@@ -104,8 +104,8 @@ func TestFolding(t *testing.T) {
 	// Folding the start hides everything.
 	want(t, Plain(Layout(tr, func(id string) bool { return id == tree.RootID }, nil)), `●  CRM search is slow ▸ 7 more`)
 
-	if !HasChildren(tr, tree.RootID) || HasChildren(tr, "n1") || DefaultFolded(tr, "n2") {
-		t.Fatal("HasChildren or DefaultFolded is wrong")
+	if !HasChildren(tr, tree.RootID) || HasChildren(tr, "n1") {
+		t.Fatal("HasChildren is wrong")
 	}
 }
 

@@ -1,5 +1,7 @@
-// decision-tree draws the big choices of a Claude Code session as a tree.
-// Claude logs them through an MCP tool; see PRD.md.
+// decision-tree keeps the big choices of a Claude Code session as a tree.
+// Claude logs them through a tool that the Claude Code mod in mod/ gives it;
+// the mod runs this program to save them, and draws the tree in a pane.
+// See PRD.md.
 package main
 
 import (
@@ -10,15 +12,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"text/tabwriter"
 	"time"
-
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"decision-tree/internal/branch"
 	"decision-tree/internal/claude"
@@ -28,7 +25,6 @@ import (
 	"decision-tree/internal/store"
 	"decision-tree/internal/tmux"
 	"decision-tree/internal/tree"
-	"decision-tree/internal/ui"
 )
 
 const version = "0.1.0"
@@ -36,9 +32,6 @@ const version = "0.1.0"
 const usage = `decision-tree: the big choices of a Claude Code session, as a tree
 
 Usage:
-  decision-tree view [session]    the live view. With no session, it follows
-                                  the tmux pane you are in. Keys: j/k move,
-                                  space fold, . you-are-here, f follow, q quit
   decision-tree print [session]   print a tree: the newest one, or the session
                                   given (the start of its id is enough)
   decision-tree list              list saved trees, newest first
@@ -52,7 +45,6 @@ Usage:
                                   never changed.
         --claude <path>           the claude program to run
         --tmux-socket <name>      a tmux server other than the default
-  decision-tree mcp               run the MCP server (Claude Code starts this)
   decision-tree record --session ID [--cwd DIR] [--tool-use-id ID]
                                   save one record_decision call, read as JSON
                                   from stdin, and print the reply. The
@@ -78,10 +70,6 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	var err error
 	switch args[0] {
-	case "mcp":
-		err = server.New().MCP(version).Run(context.Background(), &mcp.StdioTransport{})
-	case "view":
-		err = view(args[1:])
 	case "print":
 		err = printTree(store.Default(), args[1:], stdout)
 	case "list":
@@ -111,43 +99,6 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
-}
-
-func view(args []string) error {
-	s := store.Default()
-	pinned := ""
-	if len(args) > 0 {
-		id, err := s.Find(args[0])
-		if err != nil {
-			return err
-		}
-		pinned = id
-	}
-	dir, tm := claude.Dir(), tmux.Tmux{Bin: tmux.FindBin()}
-	active := func() (claude.Session, bool) {
-		pane, err := tm.ActivePane()
-		if err != nil {
-			return claude.Session{}, false
-		}
-		return claude.InPane(dir, pane)
-	}
-	bd := branchDeps(s)
-	deps := ui.Deps{
-		Store: s, Active: active, Now: time.Now,
-		Branches: func(session string) map[string][]graph.Stub { return branch.Children(s, session) },
-		Source:   func(session, node string) (claude.Cut, error) { return findSource(s, dir, session, node) },
-		Prepare:  func(session, node string) (*branch.Plan, error) { return branch.Prepare(bd, session, node, "") },
-		Create: func(p *branch.Plan, focus bool) (branch.Result, error) {
-			return branch.Create(context.Background(), bd, p, focus)
-		},
-	}
-	p := tea.NewProgram(ui.New(deps, pinned), tea.WithAltScreen(), tea.WithFPS(20))
-	// Closing the iTerm2 pane sends SIGHUP; quit cleanly then.
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGHUP)
-	go func() { <-sig; p.Quit() }()
-	_, err := p.Run()
-	return err
 }
 
 func printTree(s store.Store, args []string, w io.Writer) error {

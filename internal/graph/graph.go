@@ -87,13 +87,6 @@ func HasChildren(t *tree.Tree, id string) bool {
 	return false
 }
 
-// DefaultFolded is how a node starts: a dropped branch is folded, so the
-// live path stays short. Everything else is open.
-func DefaultFolded(t *tree.Tree, id string) bool {
-	n := t.Node(id)
-	return n != nil && n.State == tree.Dropped && HasChildren(t, id)
-}
-
 type layout struct {
 	t        *tree.Tree
 	folded   func(string) bool

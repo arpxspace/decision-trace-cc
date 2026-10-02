@@ -2,25 +2,21 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"decision-tree/internal/server"
 	"decision-tree/internal/store"
 	"decision-tree/internal/tree"
 )
 
-// TestEndToEnd runs the real binary as an MCP server over stdin/stdout, the
-// way Claude Code does. This test process plays Claude: it is the parent,
-// so it writes the session file for its own pid.
+// TestEndToEnd runs the real binary the way the Claude Code mod does: a
+// record_decision call goes to `record` as JSON on stdin, with the session,
+// its folder, and the call's tool-use id. Then the pane's commands read it.
 func TestEndToEnd(t *testing.T) {
 	tmp := t.TempDir()
 	bin := filepath.Join(tmp, "decision-tree")
@@ -29,7 +25,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 	cfg, state := filepath.Join(tmp, "claude"), filepath.Join(tmp, "state")
 	const sid = "8533417c-1b9d-4c3c-a771-f0df5b76dae2"
-	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+cfg, "XDG_STATE_HOME="+state, "CLAUDE_CODE_SESSION_ID=stale",
+	env := append(os.Environ(), "CLAUDE_CONFIG_DIR="+cfg, "XDG_STATE_HOME="+state,
 		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
 
 	// The session works in a git repo with uncommitted work, and Claude has
@@ -51,8 +47,6 @@ func TestEndToEnd(t *testing.T) {
 	git("add", ".")
 	git("commit", "-qm", "init")
 	writeFile(t, filepath.Join(repo, "app.txt"), "v2, not committed\n")
-	writeFile(t, filepath.Join(cfg, "sessions", strconv.Itoa(os.Getpid())+".json"),
-		`{"pid":1,"sessionId":"`+sid+`","cwd":"`+repo+`","status":"idle"}`)
 	// The chat, as Claude Code writes it: the user's message, Claude's call
 	// to record_decision, and the tool's answer (docs/findings.md part 9).
 	writeFile(t, filepath.Join(cfg, "projects", "-w-crm", sid+".jsonl"), strings.Join([]string{
@@ -63,24 +57,12 @@ func TestEndToEnd(t *testing.T) {
 	}, "\n")+"\n")
 	writeFile(t, filepath.Join(cfg, "projects", "-w-crm", "memory", "MEMORY.md"), "- the user likes short answers\n")
 
-	cmd := exec.Command(bin, "mcp")
+	cmd := exec.Command(bin, "record", "--session", sid, "--cwd", repo, "--tool-use-id", "toolu_e2e")
 	cmd.Env = env
-	ctx := context.Background()
-	cs, err := mcp.NewClient(&mcp.Implementation{Name: "fake-claude", Version: "0"}, nil).
-		Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
-	if err != nil {
-		t.Fatal(err)
+	cmd.Stdin = strings.NewReader(`{"topic":"Fix","options":["add a cache","add a database index"],"picked":"add a database index","reason":"fixes the query itself","by":"both"}`)
+	if out, err := cmd.CombinedOutput(); err != nil || !strings.HasPrefix(string(out), "Saved as d1.") {
+		t.Fatalf("record: %v\n%s", err, out)
 	}
-	for _, args := range []map[string]any{
-		{"topic": "Fix", "options": []string{"add a cache", "add a database index"}, "picked": "add a database index", "reason": "fixes the query itself", "by": "both"},
-	} {
-		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "record_decision", Arguments: args,
-			Meta: mcp.Meta{"claudecode/toolUseId": "toolu_e2e"}})
-		if err != nil || res.IsError {
-			t.Fatalf("record_decision(%v) = %+v, %v", args, res, err)
-		}
-	}
-	cs.Close()
 
 	out := runBin(t, bin, env, "print", "8533")
 	for _, want := range []string{

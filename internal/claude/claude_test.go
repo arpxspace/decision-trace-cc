@@ -3,7 +3,6 @@ package claude
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -18,63 +17,14 @@ func write(t *testing.T, path, body string) {
 	}
 }
 
-func TestCallerReadsParentSessionFile(t *testing.T) {
+func TestReadAll(t *testing.T) {
 	dir := t.TempDir()
-	write(t, filepath.Join(dir, "sessions", strconv.Itoa(os.Getppid())+".json"),
-		`{"pid":1,"sessionId":"8533417c","cwd":"/w/proj","tmux":"probe:@0.%0","status":"idle"}`)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "stale-id")
-	s, err := Caller(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The file wins over the variable, which goes stale after /clear.
-	if s.ID != "8533417c" || s.Cwd != "/w/proj" || s.Tmux != "probe:@0.%0" {
-		t.Fatalf("session = %+v", s)
-	}
-}
-
-func TestCallerFallsBackToVariable(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "from-env")
-	t.Setenv("CLAUDE_PROJECT_DIR", "/w/proj")
-	s, err := Caller(t.TempDir())
-	if err != nil || s.ID != "from-env" || s.Cwd != "/w/proj" {
-		t.Fatalf("session = %+v, err = %v", s, err)
-	}
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
-	if _, err := Caller(t.TempDir()); err == nil {
-		t.Fatal("no file and no variable should be an error")
-	}
-}
-
-func TestInPane(t *testing.T) {
-	dir := t.TempDir()
-	me, parent := os.Getpid(), os.Getppid()
-	session := func(pid int, id, tmux string, updated int) {
-		write(t, filepath.Join(dir, "sessions", strconv.Itoa(pid)+".json"),
-			`{"pid":`+strconv.Itoa(pid)+`,"sessionId":"`+id+`","cwd":"/w","tmux":"`+tmux+`","updatedAt":`+strconv.Itoa(updated)+`}`)
-	}
-	session(me, "old", "main:@1.%5", 100)
-	session(parent, "new", "main:@1.%5", 200)  // same pane, newer file
-	session(999999, "dead", "main:@2.%6", 300) // no such process
+	write(t, filepath.Join(dir, "sessions", "41.json"), `{"pid":41,"sessionId":"a","cwd":"/w","tmux":"main:@1.%5"}`)
+	write(t, filepath.Join(dir, "sessions", "42.json"), `{"pid":42}`) // half written: no sessionId
 	write(t, filepath.Join(dir, "sessions", "123.abc.key"), "{}")
-
-	if s, ok := InPane(dir, "%5"); !ok || s.ID != "new" {
-		t.Fatalf("InPane(%%5) = %+v, %v; want the newer session", s, ok)
-	}
-	if s, ok := InPane(dir, "%6"); ok {
-		t.Fatalf("InPane(%%6) = %+v; a dead Claude should not count", s)
-	}
-	if _, ok := InPane(dir, ""); ok {
-		t.Fatal("empty pane matched a session")
-	}
-}
-
-func TestPaneID(t *testing.T) {
-	cases := map[string]string{"1:@1.%2": "%2", "my.proj:@12.%7": "%7", "": "", "dev:3.4": "", "junk": ""}
-	for in, want := range cases {
-		if got := (Session{Tmux: in}).PaneID(); got != want {
-			t.Errorf("PaneID(%q) = %q, want %q", in, got, want)
-		}
+	all := ReadAll(dir)
+	if len(all) != 1 || all[0].ID != "a" || all[0].PID != 41 || all[0].Tmux != "main:@1.%5" {
+		t.Fatalf("ReadAll = %+v", all)
 	}
 }
 

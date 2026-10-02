@@ -25,9 +25,6 @@ func TestNoServerIsNotAnError(t *testing.T) {
 	}
 	// A private socket nobody started: the same as tmux not running.
 	tm := Tmux{Socket: "decision-tree-test-nobody"}
-	if pane, err := tm.ActivePane(); pane != "" || err != nil {
-		t.Fatalf("ActivePane = %q, %v; want \"\", nil", pane, err)
-	}
 	if s, err := tm.ActiveSession(); s != "" || err != nil {
 		t.Fatalf("ActiveSession = %q, %v", s, err)
 	}

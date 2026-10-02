@@ -1,12 +1,11 @@
-// Package server is the MCP server Claude Code starts once per session. It
-// gives Claude two tools, record_decision and show_decision_tree, plus the
-// rules for when to use them (PRD sections 6 and 7). The Claude Code mod in
-// mod/ offers the same tools and rules through Record, Show, and Describe
-// (PRD 18).
+// Package server answers Claude's two tools, record_decision and
+// show_decision_tree, and holds the rules for when to use them (PRD sections
+// 6 and 7). The Claude Code mod in mod/ offers the tools to Claude and runs
+// the record, show, and describe commands, which call Record, Show, and
+// Describe (PRD 18).
 package server
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"decision-tree/internal/checkpoint"
 	"decision-tree/internal/claude"
@@ -23,9 +21,10 @@ import (
 	"decision-tree/internal/tree"
 )
 
-// Instructions are the rules from PRD section 6. Claude Code shows them in
-// every session, even before the tools are loaded. It cuts them off at
-// 2,048 characters, so they must stay shorter (a test checks).
+// Instructions are the rules from PRD section 6. The mod adds them to
+// Claude's system prompt in every session. They were kept under 2,048
+// characters, Claude Code's limit for an MCP server's instructions, and a
+// test still keeps them there.
 const Instructions = `decision-tree draws the choices made in this session as a tree. The user watches it in a side pane, so keep it right with record_decision.
 
 Log a decision only once it is made. Never log options that are only being discussed ("Redis, Postgres, or an in-memory cache are all possible" is not a decision). Made means:
@@ -56,9 +55,6 @@ The reply gives the decision id and where "you are here" is.`
 
 const showDescription = `Show this session's decision tree as text, with decision ids (d1) and node ids (n1).`
 
-// alwaysLoad asks Claude Code not to hold the tool back (docs/findings.md, part 2).
-var alwaysLoad = mcp.Meta{"anthropic/alwaysLoad": true}
-
 // RecordInput is what Claude sends to record_decision. See tree.Call.
 type RecordInput struct {
 	Topic      string   `json:"topic,omitempty" jsonschema:"What was decided, as a short statement, not a question: Database. Needed for a new decision."`
@@ -73,10 +69,9 @@ type RecordInput struct {
 
 // Server answers the tool calls.
 type Server struct {
-	Store  store.Store
-	Caller func() (claude.Session, error) // which session is calling; asked on every call
-	Title  func(sessionID string) string  // names the start node of a new tree
-	Now    func() time.Time
+	Store store.Store
+	Title func(sessionID string) string // names the start node of a new tree
+	Now   func() time.Time
 	// Checkpoint saves what a branch needs to start from a new pick (PRD
 	// 17.1) and puts it on the node. nil takes no checkpoints.
 	Checkpoint func(sess claude.Session, t *tree.Tree, node, toolUseID string, at time.Time)
@@ -86,8 +81,7 @@ type Server struct {
 func New() *Server {
 	dir := claude.Dir()
 	return &Server{
-		Store:  store.Default(),
-		Caller: func() (claude.Session, error) { return claude.Caller(dir) },
+		Store: store.Default(),
 		Title: func(id string) string {
 			path, err := claude.ChatPath(dir, id)
 			if err != nil {
@@ -123,15 +117,6 @@ func New() *Server {
 	}
 }
 
-// MCP builds the MCP server with both tools.
-func (s *Server) MCP(version string) *mcp.Server {
-	m := mcp.NewServer(&mcp.Implementation{Name: "decision-tree", Version: version},
-		&mcp.ServerOptions{Instructions: Instructions})
-	mcp.AddTool(m, &mcp.Tool{Name: "record_decision", Description: recordDescription, InputSchema: recordSchema(), Meta: alwaysLoad}, s.record)
-	mcp.AddTool(m, &mcp.Tool{Name: "show_decision_tree", Description: showDescription, Meta: alwaysLoad}, s.show)
-	return m
-}
-
 func recordSchema() *jsonschema.Schema {
 	schema, err := jsonschema.For[RecordInput](nil)
 	if err != nil {
@@ -141,7 +126,7 @@ func recordSchema() *jsonschema.Schema {
 	return schema
 }
 
-// Tool is one of the two tools, for a host that is not the MCP server.
+// Tool is one of the two tools, as the mod registers it.
 type Tool struct {
 	Name        string             `json:"name"`
 	Description string             `json:"description"`
@@ -154,8 +139,8 @@ type Spec struct {
 	Tools        []Tool `json:"tools"`
 }
 
-// Describe gives the rules and both tools, word for word as the MCP server
-// sends them, so the mod never keeps a copy of its own.
+// Describe gives the rules and both tools, so the mod never keeps a copy of
+// its own.
 func Describe() Spec {
 	return Spec{Instructions: Instructions, Tools: []Tool{
 		{Name: "record_decision", Description: recordDescription, InputSchema: recordSchema()},
@@ -163,30 +148,12 @@ func Describe() Spec {
 	}}
 }
 
-func (s *Server) record(_ context.Context, req *mcp.CallToolRequest, in RecordInput) (*mcp.CallToolResult, any, error) {
-	sess, err := s.Caller()
-	if err != nil {
-		return nil, nil, fmt.Errorf("decision-tree cannot tell which session this is: %v", err)
-	}
-	// Claude Code sends the id of this tool use with each call
-	// (docs/findings.md part 1). It later finds where to cut the chat.
-	var toolUseID string
-	if req != nil && req.Params != nil {
-		toolUseID, _ = req.Params.Meta["claudecode/toolUseId"].(string)
-	}
-	reply, err := s.Record(sess, in, toolUseID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return text(reply), nil, nil
-}
-
 // Record saves one record_decision call in the session's tree and returns
 // the one-line reply. toolUseID is the call's id in the chat; it marks where
 // a branch would cut.
 func (s *Server) Record(sess claude.Session, in RecordInput, toolUseID string) (string, error) {
 	if strings.TrimSpace(in.Picked) == "" {
-		// The schema already asks for it; this catches "picked": "".
+		// The schema asks for it; this also catches "picked": "".
 		return "", fmt.Errorf("picked is needed: only log a decision once one option has won. Do not log options that are only being discussed.")
 	}
 	now := s.Now()
@@ -208,14 +175,6 @@ func (s *Server) Record(sess claude.Session, in RecordInput, toolUseID string) (
 		return "", err
 	}
 	return Summary(t, res), nil
-}
-
-func (s *Server) show(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-	sess, err := s.Caller()
-	if err != nil {
-		return nil, nil, fmt.Errorf("decision-tree cannot tell which session this is: %v", err)
-	}
-	return text(s.Show(sess.ID)), nil, nil
 }
 
 // Show is the session's tree as short text with ids.
@@ -264,8 +223,4 @@ func quoted(t *tree.Tree, ids []string) string {
 		parts = append(parts, fmt.Sprintf("%s %q", id, t.Decision(id).Topic))
 	}
 	return strings.Join(parts, ", ")
-}
-
-func text(s string) *mcp.CallToolResult {
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: s}}}
 }

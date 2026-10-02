@@ -1,6 +1,6 @@
-// Package tmux asks tmux which pane you are looking at. The view runs in an
-// iTerm2 split outside tmux (like claude-sidebar), so it cannot just ask
-// for "the current pane": it asks each tmux client instead.
+// Package tmux opens a branch's window in tmux (PRD 17.2). The Go program
+// runs outside the session's tmux pane, so it cannot just ask for "the
+// current session": it asks each tmux client instead.
 package tmux
 
 import (
@@ -30,13 +30,6 @@ func FindBin() string {
 		}
 	}
 	return "tmux"
-}
-
-// ActivePane is the pane shown by the tmux client used most recently, like
-// "%23". It is "" when tmux is not running or no terminal shows it.
-func (t Tmux) ActivePane() (string, error) {
-	c, err := t.newestClient()
-	return c.pane, err
 }
 
 // ActiveSession is the tmux session shown by the client used most recently,
@@ -72,12 +65,12 @@ func (t Tmux) Focus(pane string) error {
 	return err
 }
 
-type client struct{ tty, session, pane string }
+type client struct{ tty, session string }
 
 // newestClient is the client with the newest activity (the last key press
 // or output). A zero client means tmux is not running or nobody is attached.
 func (t Tmux) newestClient() (client, error) {
-	out, err := t.run("list-clients", "-F", "#{client_activity}\t#{client_tty}\t#{client_session}\t#{pane_id}")
+	out, err := t.run("list-clients", "-F", "#{client_activity}\t#{client_tty}\t#{client_session}")
 	if errors.Is(err, ErrNoServer) {
 		return client{}, nil
 	}
@@ -88,11 +81,11 @@ func (t Tmux) newestClient() (client, error) {
 	bestAt := int64(-1)
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(line, "\t")
-		if len(f) != 4 {
+		if len(f) != 3 {
 			continue
 		}
 		if at, err := strconv.ParseInt(f[0], 10, 64); err == nil && at > bestAt {
-			best, bestAt = client{tty: f[1], session: f[2], pane: f[3]}, at
+			best, bestAt = client{tty: f[1], session: f[2]}, at
 		}
 	}
 	return best, nil
