@@ -51,9 +51,9 @@ type Row struct {
 
 // Stub is a branch to draw under the node it came from.
 type Stub struct {
-	Session   string
-	Name      string
-	Decisions int // how many decisions the branch has
+	Session   string `json:"session"`
+	Name      string `json:"name"`
+	Decisions int    `json:"decisions"` // how many decisions the branch has
 }
 
 // Symbols for each state.

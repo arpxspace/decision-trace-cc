@@ -1,14 +1,23 @@
 {
   "name": "decision-tree",
   "version": "0.1.0",
-  "description": "Claude logs the project decisions of a session as a tree; the Go program saves it and draws it",
-  "author": { "name": "Amir Panahi" },
+  "description": "Claude logs the project decisions of a session as a tree; a pane draws it, and the Go program saves it",
+  "author": {
+    "name": "Amir Panahi"
+  },
   "userConfig": {
     "binary": {
       "type": "string",
       "title": "decision-tree program",
       "description": "The decision-tree program to run: a name on PATH, or a full path",
       "default": "decision-tree"
+    },
+    "openAtStart": {
+      "type": "boolean",
+      "title": "Open the tree pane at start",
+      "description": "Open the decision tree pane when a session starts (it shows once the terminal is wide enough)",
+      "default": true
     }
-  }
+  },
+  "types": "./types/index.d.ts"
 }

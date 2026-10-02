@@ -1,8 +1,8 @@
 # decision-tree — PRD
 
 Status: being built. Steps 1, 2, 3, and 5 are done; the week of real use
-(step 4) is running. Last updated 2 Oct 2026, when the Claude Code mod was
-added (section 18).
+(step 4) is running. Last updated 2 Oct 2026, when the tree moved into a
+pane inside Claude Code (section 19).
 
 ## 1. What it is
 
@@ -448,6 +448,7 @@ Every fix locks the node (section 8).
 | `record --session <id> [--cwd <dir>] [--tool-use-id <id>]` | The mod | Saves one `record_decision` call, read as JSON from stdin, and prints the reply (section 18) |
 | `show --session <id>` | The mod | Prints the tree as `show_decision_tree` does |
 | `describe` | The mod | Prints the rules and both tools as JSON |
+| `data --session <id>` | The mod's pane | Prints a tree, the branches made from it, and its file's path as JSON (section 19). `source … --json` and `branch … --json --plan` / `--yes` do the same for the pane's `enter` and `b` |
 
 - Same screen libraries as claude-sidebar: Bubble Tea and Lip Gloss.
   The MCP server uses the official MCP library for Go
@@ -551,6 +552,7 @@ Done on 29 Sep 2026. The full write-up is in `docs/findings.md`.
 7. Past trees (`o`), install, the tmux key.
 8. Branch from a decision (section 17). Research done 29 Sep 2026.
 9. ~~The Claude Code mod (section 18).~~ Done and switched on 2 Oct 2026.
+10. ~~The tree inside Claude Code (section 19).~~ Done 2 Oct 2026.
 
 Step 4 is the real test. If Claude does not log good decisions, the screen
 does not matter.
@@ -576,7 +578,10 @@ does not matter.
 | 29 Sep 2026 | Symbols `×` rejected, `↺` changed | Amir's acceptance scenarios |
 | 29 Sep 2026 | Scroll sideways instead of cutting long text | Amir asked to read the full text |
 | 2 Oct 2026 | A Claude Code mod gives Claude the tools; Go stays the brain | Keeps the tested Go tree logic (section 18) |
-| 2 Oct 2026 | The Go view stays the screen; the mod draws no pane | Amir wants the tree in its own window |
+| 2 Oct 2026 | The Go view stays the screen; the mod draws no pane | Changed the same day (next row) |
+| 2 Oct 2026 | The tree moves into a pane inside Claude Code | Amir wants the same screen and keys inside Claude Code, not in a window of its own (section 19) |
+| 2 Oct 2026 | Only the screen moves to TypeScript; Go stays the brain | The Go tree logic, file locks, checkpoints, and branching are tested; a mod has no Node to lock a file with |
+| 2 Oct 2026 | In the pane, long text wraps instead of scrolling sideways | The pane is narrow; Amir wants to read the whole text without scrolling |
 
 **The first plan** used a second AI to read the chat after every Claude reply.
 It ran through Codex CLI with `gpt-5.6-luna`. A test worked: 10 seconds and
@@ -905,3 +910,120 @@ To go back: remove that line and add the MCP server again (section 10).
   need to read the chat file (risk 12.4).
 - The second guard from 12.1: after each turn, ask Claude, over the same
   cached chat, whether a decision was made and not logged.
+
+
+## 19. The tree inside Claude Code
+
+Asked for by Amir on 2 Oct 2026: the same screen and keys as `decision-tree
+view`, but inside Claude Code instead of a window of its own. The mod now
+draws the tree in a pane. Only the screen moved to TypeScript. The Go
+program stays the brain: the pane asks it for the tree, and for anything
+that reads the chat or changes files.
+
+```
+ Claude Code (fullscreen)
+ ┌───────────────────────────┬────────────────────────────────┐
+ │ the chat                  │ Decisions                      │
+ │                           │   ●  Todo app                  │
+ │                           │   ├─×  SQLite                  │
+ │                           │ › ●  Database: PostgreSQL  ◀   │
+ │                           │ ────────────────────────────── │
+ │                           │  Picked by you · 16:21         │
+ └───────────────────────────┴───────────────┬────────────────┘
+                                             │ the pane runs
+                                             ▼
+   decision-tree data --session <id>           the tree, as JSON
+   decision-tree source <s> <node> --json      where a pick came from
+   decision-tree branch <s> <node> --json      --plan asks, --yes makes it
+```
+
+### 19.1 Opening it
+
+- `/decision-tree` opens the pane on this session's tree.
+  `/decision-tree <session>` opens another session's tree (the start of its
+  id is enough).
+- A session also opens it by itself at the start, once the terminal is 144
+  columns wide (110 if you opened it before). The option `openAtStart`
+  (in the config menu) turns that off.
+- In fullscreen mode the pane sits beside the chat. Otherwise it sits above
+  the prompt.
+- It draws the same graph, details panel, and screens as the Go view
+  (sections 9 and 17.4), with these changes asked for by Amir on 2 Oct 2026:
+  - The body is black, edge to edge.
+  - The top line just says "Decision": the tree belongs to its session, so
+    no folder, no count of decisions. Another session's tree adds its id.
+  - The top node reads "Start", not the session's title. Its details say
+    when the session started, and where it branched from, if it did.
+  - Long text wraps instead of being cut: a long row goes on below, with
+    the graph's lines carried down beside it, and the details panel shows
+    all of its text, growing up to half the pane. There is no sideways
+    scrolling, so `←`/`→`/`h`/`l`/`0` do nothing here.
+- The font cannot be made smaller for the pane alone. A terminal draws
+  every cell the same size, and a mod has no font setting. (The Go view
+  could shrink with Cmd −, since it was an iTerm2 pane of its own.)
+- Three gray bits are Claude Code's own frame, not the mod's, and a mod
+  cannot paint them: the line between the chat and the pane, the ✕ close
+  button, and the pane's bottom row. (Tested 2 Oct 2026: the pane reports
+  one row fewer than it shows, and a line drawn into that row is pushed
+  out of sight.)
+
+### 19.2 Keys
+
+**Click the tree once to give it the keys.** `esc` gives them back to the
+prompt. A pane cannot take the keys by itself: Claude Code hands keys only
+to a pane's buttons, or to the tree's area after a click (tested 2 Oct
+2026). The Go view was the same: you clicked its iTerm2 pane first.
+
+The keys are the Go view's, with these changes:
+
+| Key | In the pane |
+|-----|-------------|
+| click | Puts the cursor on that row |
+| `f` | Back to this session's tree. (In the Go view: follow the tmux pane. The pane always belongs to its own session, so there is nothing to follow.) |
+| `q` | Closes the screen on top, or the pane |
+| `esc` | Gives the keys back to the prompt. It never reaches the pane. |
+| `←` `→` `h` `l` `0` | Nothing: long text wraps instead of scrolling sideways |
+
+### 19.3 Staying live
+
+Four times a second the pane checks the tree file's time. It runs
+`decision-tree data` only when the file changed, and every 2 seconds to
+find new branches. After Claude calls `record_decision`, it loads at once.
+On 2 Oct 2026 a decision logged from the shell showed in the pane within a
+second, and a change in place turned the old pick into `↺`.
+
+### 19.4 Files
+
+| File | What it is |
+|------|------------|
+| `mod/hooks/register.tsx` | The tools (section 18), the pane, `/decision-tree`, and what the keys ask for |
+| `mod/hooks/view.ts` | The screen, ported from `internal/ui`. It runs as a Client (a piece of the mod that draws one area and gets its keys), so the cursor, folds, and scroll live in the pane and keys feel instant |
+| `mod/hooks/graph.ts` | The layout, ported from `internal/graph`. On 2 Oct 2026 it drew all 6 saved trees exactly as `decision-tree print` does |
+| `mod/hooks/text.ts` | Cell widths, wrapping, times |
+| `mod/types/index.d.ts` | The tree's shape, and the values the pane keeps |
+
+Two rules of mods found while building, for next time:
+- A mod never keeps `$` (its handle on Claude Code) in a variable. It may
+  pass `$` only to functions declared at the top of the file.
+- Work that takes seconds (making a branch) runs from the session's timer,
+  not from the hook that heard the key.
+
+### 19.5 Tests
+
+- `claude plugin test mod`: 21 tests. 3 are graph pictures copied from
+  `internal/graph`'s tests. The pane tests cover drawing (terminal and
+  desktop), keys, a click, the source screen, a branch (yes and no), a
+  live change, a session with no decisions, and another session's tree.
+- `go test`: `data`, `source --json`, and `branch --plan --json` in
+  `TestEndToEnd`, and `TestDataWithNoTree`.
+- Live, 2 Oct 2026, in a test Claude Code in a private tmux server: the
+  pane drew a real tree, and click, `j`/`k`, space, `G`, `enter`, `b`, `p`,
+  `f`, and `q` all worked.
+
+### 19.6 Not done yet
+
+- The Go view still works, so nothing is lost while the pane proves itself.
+  Remove it, with `start`/`toggle` and the tmux key from step 7, once it has.
+- Making a branch from the pane was tested with a fake Go program, not live,
+  because a live branch opens a real tmux window. The Go side is the same
+  code the Go view's `b` key runs.

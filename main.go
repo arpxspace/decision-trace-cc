@@ -60,6 +60,12 @@ Usage:
                                   next two.
   decision-tree show --session ID print the tree as show_decision_tree does
   decision-tree describe          print the rules and both tools as JSON
+  decision-tree data --session ID print a tree, the branches made from it,
+                                  and its file's path as JSON, for the mod's
+                                  pane. source and branch take --json too:
+                                  source <session> <node> --json, and
+                                  branch ... --json with --plan (ask nothing,
+                                  make nothing) or --yes (make it)
   decision-tree version
 `
 
@@ -90,6 +96,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		err = enc.Encode(server.Describe())
+	case "data":
+		err = dataCmd(store.Default(), args[1:], stdout)
 	case "version":
 		fmt.Fprintln(stdout, version)
 	case "help", "-h", "--help":
@@ -182,13 +190,17 @@ func branchCmd(args []string, in io.Reader, w io.Writer) error {
 	d := branchDeps(store.Default())
 	var pos []string
 	var name string
-	var focus, yes bool
+	var focus, yes, plan, asJSON bool
 	for i := 0; i < len(args); i++ {
 		switch a := args[i]; a {
 		case "--focus":
 			focus = true
 		case "--yes", "-y":
 			yes = true
+		case "--plan":
+			plan = true
+		case "--json":
+			asJSON = true
 		case "--name", "--claude", "--tmux-socket":
 			if i+1 >= len(args) {
 				return fmt.Errorf("%s needs a value", a)
@@ -208,6 +220,12 @@ func branchCmd(args []string, in io.Reader, w io.Writer) error {
 	}
 	if len(pos) != 2 {
 		return fmt.Errorf("usage: decision-tree branch <session> <node> [--name N] [--focus] [--yes]")
+	}
+	if asJSON {
+		if plan == yes {
+			return errors.New("--json needs --plan or --yes")
+		}
+		return branchJSON(d, pos[0], pos[1], name, plan, focus, w)
 	}
 	p, err := branch.Prepare(d, pos[0], pos[1], name)
 	if err != nil {
@@ -287,6 +305,70 @@ func toolCmd(srv *server.Server, name string, args []string, in io.Reader, w io.
 	return nil
 }
 
+// paneData is what the mod's pane draws for one session (PRD 19).
+type paneData struct {
+	Session  string                  `json:"session"`
+	Path     string                  `json:"path"` // the tree file, so the pane can tell when it changes
+	Tree     *tree.Tree              `json:"tree"` // nil when the session has no tree yet
+	Branches map[string][]graph.Stub `json:"branches"`
+}
+
+// dataCmd prints a session's tree and the branches made from it as JSON.
+// The session may be the start of an id, as for print.
+func dataCmd(s store.Store, args []string, w io.Writer) error {
+	if len(args) != 2 || args[0] != "--session" || args[1] == "" {
+		return errors.New("usage: decision-tree data --session ID")
+	}
+	id := args[1]
+	path, err := s.Path(id)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if found, err := s.Find(id); err == nil {
+			id = found
+			path, _ = s.Path(id)
+		}
+	}
+	out := paneData{Session: id, Path: path, Branches: map[string][]graph.Stub{}}
+	t, err := s.Load(id)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+	case err != nil:
+		return err
+	default:
+		t.Fixes = nil // only the view's own undo needs them
+		out.Tree = t
+		out.Branches = branch.Children(s, id)
+	}
+	return json.NewEncoder(w).Encode(out)
+}
+
+// branchJSON is branch for the mod's pane: --plan prints what a branch
+// would start with and makes nothing; otherwise it makes the branch and
+// prints what it made. A failure prints the error, and the command to start
+// the branch by hand when there is one.
+func branchJSON(d branch.Deps, session, node, name string, plan, focus bool, w io.Writer) error {
+	enc := json.NewEncoder(w)
+	p, err := branch.Prepare(d, session, node, name)
+	if err != nil {
+		return err
+	}
+	if plan {
+		return enc.Encode(map[string]string{"name": p.Name, "summary": p.Summary()})
+	}
+	res, err := branch.Create(context.Background(), d, p, focus)
+	out := map[string]any{"name": p.Name, "session": p.Session, "dir": p.Dir,
+		"pane": res.Pane, "command": res.Command, "copied": res.Copied}
+	if err != nil {
+		out["error"] = err.Error()
+	}
+	if encErr := enc.Encode(out); encErr != nil {
+		return encErr
+	}
+	return err
+}
+
 func branchDeps(st store.Store) branch.Deps {
 	return branch.Deps{
 		Store: st, ClaudeDir: claude.Dir(), Tmux: tmux.Tmux{Bin: tmux.FindBin()},
@@ -314,12 +396,27 @@ func findSource(st store.Store, claudeDir, session, node string) (claude.Cut, er
 // source prints where a decision came from, and what a branch from it
 // would start with (PRD 17).
 func source(s store.Store, claudeDir string, args []string, w io.Writer) error {
-	if len(args) < 1 || len(args) > 2 {
-		return fmt.Errorf("usage: decision-tree source <session> [node]")
+	asJSON := len(args) > 0 && args[len(args)-1] == "--json"
+	if asJSON {
+		args = args[:len(args)-1]
+	}
+	if len(args) < 1 || len(args) > 2 || asJSON && len(args) != 2 {
+		return fmt.Errorf("usage: decision-tree source <session> [node], or source <session> <node> --json")
 	}
 	id, err := s.Find(args[0])
 	if err != nil {
 		return err
+	}
+	if asJSON {
+		// For the mod's pane: where one pick came from in the chat, or why
+		// that is not known.
+		out := map[string]any{}
+		if cut, err := findSource(s, claudeDir, id, args[1]); err != nil {
+			out["error"] = err.Error()
+		} else {
+			out["prompt_number"], out["prompt"], out["before"] = cut.PromptNumber, cut.Prompt, cut.Before
+		}
+		return json.NewEncoder(w).Encode(out)
 	}
 	t, err := s.Load(id)
 	if err != nil {

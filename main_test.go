@@ -147,6 +147,57 @@ func TestEndToEnd(t *testing.T) {
 			t.Errorf("source is missing %q:\n%s", want, out)
 		}
 	}
+
+	// The mod's pane (PRD 19) reads the same things as JSON.
+	var data struct {
+		Session  string
+		Path     string
+		Tree     *tree.Tree
+		Branches map[string][]struct {
+			Session   string
+			Name      string
+			Decisions int
+		}
+	}
+	if err := json.Unmarshal([]byte(runBin(t, bin, env, "data", "--session", "8533")), &data); err != nil {
+		t.Fatal(err)
+	}
+	if data.Session != sid || data.Path != filepath.Join(state, "decision-tree", sid+".json") ||
+		data.Tree == nil || data.Tree.Here != "n2" || len(data.Branches["n2"]) != 1 || data.Branches["n2"][0].Name != "try-a-cache" {
+		t.Errorf("data = %+v", data)
+	}
+	var cut struct {
+		PromptNumber int `json:"prompt_number"`
+		Prompt       string
+		Error        string
+	}
+	if err := json.Unmarshal([]byte(runBin(t, bin, env, "source", "8533", "n2", "--json")), &cut); err != nil ||
+		cut.PromptNumber != 1 || cut.Prompt != "Search is slow. Add an index." || cut.Error != "" {
+		t.Errorf("source --json = %+v, %v", cut, err)
+	}
+	var plan struct{ Name, Summary string }
+	if err := json.Unmarshal([]byte(runBin(t, bin, env, "branch", sid, "n2", "--plan", "--json")), &plan); err != nil ||
+		plan.Name != "fix-add-a-database-index" || !strings.Contains(plan.Summary, "Branch from:  Fix: add a database index") {
+		t.Errorf("branch --plan --json = %+v, %v", plan, err)
+	}
+}
+
+// TestDataWithNoTree: a session that has made no decision yet has no tree
+// file. data says where the file will be, so the pane can wait for it.
+func TestDataWithNoTree(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"data", "--session", "s1"}, nil, &out, &errOut); code != 0 {
+		t.Fatalf("code %d, stderr %q", code, errOut.String())
+	}
+	want := `{"session":"s1","path":"` + filepath.Join(state, "decision-tree", "s1.json") + `","tree":null,"branches":{}}` + "\n"
+	if out.String() != want {
+		t.Errorf("data = %s, want %s", out.String(), want)
+	}
+	if code := run([]string{"data", "--session", "../x"}, nil, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "bad session id") {
+		t.Errorf("a bad id: code %d, stderr %q", code, errOut.String())
+	}
 }
 
 func TestPrintWithNoTrees(t *testing.T) {
