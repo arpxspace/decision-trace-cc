@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"decision-tree/internal/server"
 	"decision-tree/internal/store"
 	"decision-tree/internal/tree"
 )
@@ -150,12 +152,69 @@ func TestEndToEnd(t *testing.T) {
 func TestPrintWithNoTrees(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var out, errOut bytes.Buffer
-	if code := run([]string{"print"}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "no trees saved yet") {
+	if code := run([]string{"print"}, nil, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "no trees saved yet") {
 		t.Fatalf("code %d, stderr %q", code, errOut.String())
 	}
 	out.Reset()
-	if code := run([]string{"list"}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "No trees saved yet") {
+	if code := run([]string{"list"}, nil, &out, &errOut); code != 0 || !strings.Contains(out.String(), "No trees saved yet") {
 		t.Fatalf("code %d, stdout %q", code, out.String())
+	}
+}
+
+// TestToolCommands is the mod's side of the tools (PRD 18): record and show
+// for the session the mod names, and describe with the rules and both tools.
+func TestToolCommands(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	cwd := t.TempDir() // not a git repo, so this repo is never snapshotted
+	session := []string{"--session", "s1", "--cwd", cwd}
+	call := func(stdin string, args ...string) (string, string, int) {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		code := run(args, strings.NewReader(stdin), &out, &errOut)
+		return out.String(), errOut.String(), code
+	}
+
+	out, errOut, code := call(`{"topic":"Database","options":["SQLite","PostgreSQL"],"picked":"PostgreSQL","reason":"many writers","by":"user"}`,
+		append([]string{"record", "--tool-use-id", "toolu_1"}, session...)...)
+	if code != 0 || !strings.HasPrefix(out, "Saved as d1. You are here: PostgreSQL (n2).") {
+		t.Fatalf("record: code %d, stdout %q, stderr %q", code, out, errOut)
+	}
+	tr, err := store.Store{Dir: filepath.Join(state, "decision-tree")}.Load("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cp := tr.Node("n2").Checkpoint; cp.ToolUseID != "toolu_1" {
+		t.Errorf("the pick's checkpoint should keep the tool use id: %+v", cp)
+	}
+	if tr.Folder != cwd {
+		t.Errorf("folder = %q, want %q", tr.Folder, cwd)
+	}
+
+	if out, _, code := call("", append([]string{"show"}, session...)...); code != 0 || !strings.Contains(out, "d1: Database\n    × n1 SQLite\n    ● n2 PostgreSQL ◀") {
+		t.Errorf("show: code %d, stdout %q", code, out)
+	}
+
+	// Bad calls fail with a message Claude can act on, and change nothing.
+	if _, errOut, code := call(`{"topic":"Cache","options":["Redis"],"picked":"","reason":"-","by":"user"}`, append([]string{"record"}, session...)...); code != 1 || !strings.Contains(errOut, "picked is needed") {
+		t.Errorf("no pick: code %d, stderr %q", code, errOut)
+	}
+	if _, errOut, code := call(`{}`, "record"); code != 1 || !strings.Contains(errOut, "--session is needed") {
+		t.Errorf("no session: code %d, stderr %q", code, errOut)
+	}
+
+	out, _, code = call("", "describe")
+	var spec server.Spec
+	if err := json.Unmarshal([]byte(out), &spec); err != nil || code != 0 {
+		t.Fatalf("describe: code %d, %v\n%s", code, err, out)
+	}
+	if spec.Instructions != server.Instructions || len(spec.Tools) != 2 ||
+		spec.Tools[0].Name != "record_decision" || spec.Tools[1].Name != "show_decision_tree" {
+		t.Fatalf("describe = %+v", spec)
+	}
+	if !strings.Contains(out, `"required": [`) || !strings.Contains(out, `"picked"`) {
+		t.Errorf("record_decision's schema should require picked:\n%s", out)
 	}
 }
 

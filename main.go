@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -52,12 +53,19 @@ Usage:
         --claude <path>           the claude program to run
         --tmux-socket <name>      a tmux server other than the default
   decision-tree mcp               run the MCP server (Claude Code starts this)
+  decision-tree record --session ID [--cwd DIR] [--tool-use-id ID]
+                                  save one record_decision call, read as JSON
+                                  from stdin, and print the reply. The
+                                  Claude Code mod in mod/ runs this, and the
+                                  next two.
+  decision-tree show --session ID print the tree as show_decision_tree does
+  decision-tree describe          print the rules and both tools as JSON
   decision-tree version
 `
 
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+func main() { os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -75,7 +83,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "source":
 		err = source(store.Default(), claude.Dir(), args[1:], stdout)
 	case "branch":
-		err = branchCmd(args[1:], os.Stdin, stdout)
+		err = branchCmd(args[1:], stdin, stdout)
+	case "record", "show":
+		err = toolCmd(server.New(), args[0], args[1:], stdin, stdout)
+	case "describe":
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		err = enc.Encode(server.Describe())
 	case "version":
 		fmt.Fprintln(stdout, version)
 	case "help", "-h", "--help":
@@ -227,6 +241,49 @@ func branchCmd(args []string, in io.Reader, w io.Writer) error {
 	case res.Command != "":
 		fmt.Fprintf(w, "tmux is not running. To start the branch:\n  %s\n", res.Command)
 	}
+	return nil
+}
+
+// toolCmd answers record_decision or show_decision_tree for the mod (PRD
+// 18). The mod knows the session, so it says which one; the MCP server has
+// to look it up.
+func toolCmd(srv *server.Server, name string, args []string, in io.Reader, w io.Writer) error {
+	sess := claude.Session{}
+	var toolUseID string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a != "--session" && a != "--cwd" && a != "--tool-use-id" {
+			return fmt.Errorf("unknown flag %q", a)
+		}
+		if i+1 >= len(args) {
+			return fmt.Errorf("%s needs a value", a)
+		}
+		i++
+		switch a {
+		case "--session":
+			sess.ID = args[i]
+		case "--cwd":
+			sess.Cwd = args[i]
+		case "--tool-use-id":
+			toolUseID = args[i]
+		}
+	}
+	if sess.ID == "" {
+		return fmt.Errorf("--session is needed")
+	}
+	if name == "show" {
+		fmt.Fprintln(w, srv.Show(sess.ID))
+		return nil
+	}
+	var call server.RecordInput
+	if err := json.NewDecoder(in).Decode(&call); err != nil {
+		return fmt.Errorf("the call should come as JSON on stdin: %v", err)
+	}
+	reply, err := srv.Record(sess, call, toolUseID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w, reply)
 	return nil
 }
 

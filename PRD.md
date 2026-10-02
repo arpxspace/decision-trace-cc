@@ -1,8 +1,8 @@
 # decision-tree — PRD
 
 Status: being built. Steps 1, 2, 3, and 5 are done; the week of real use
-(step 4) is running. Last updated 29 Sep 2026, after Amir's acceptance tests
-(section 16).
+(step 4) is running. Last updated 2 Oct 2026, when the Claude Code mod was
+added (section 18).
 
 ## 1. What it is
 
@@ -445,6 +445,9 @@ Every fix locks the node (section 8).
 | `list` | You | Lists saved trees, newest first: when, session, folder, how many decisions, start label |
 | `branch <session> <node>` | You (the view's `b` key later) | Starts a new Claude session from a decision, in a new tmux window: chat, code, memory, and tree as they were then. Shows what it will start with and asks first; `--yes` skips the question, `--focus` jumps to it, `--name` names it |
 | `source <session> [node]` | You | Where each pick came from in the chat (your message, what Claude said before), where a branch would cut, and what its checkpoint saved |
+| `record --session <id> [--cwd <dir>] [--tool-use-id <id>]` | The mod | Saves one `record_decision` call, read as JSON from stdin, and prints the reply (section 18) |
+| `show --session <id>` | The mod | Prints the tree as `show_decision_tree` does |
+| `describe` | The mod | Prints the rules and both tools as JSON |
 
 - Same screen libraries as claude-sidebar: Bubble Tea and Lip Gloss.
   The MCP server uses the official MCP library for Go
@@ -547,6 +550,7 @@ Done on 29 Sep 2026. The full write-up is in `docs/findings.md`.
 6. Fixes and locks.
 7. Past trees (`o`), install, the tmux key.
 8. Branch from a decision (section 17). Research done 29 Sep 2026.
+9. ~~The Claude Code mod (section 18).~~ Done and switched on 2 Oct 2026.
 
 Step 4 is the real test. If Claude does not log good decisions, the screen
 does not matter.
@@ -571,6 +575,8 @@ does not matter.
 | 29 Sep 2026 | Changing a decision happens in place; `drop_later` sets later ones aside | Acceptance scenario 4; the old way lost later decisions |
 | 29 Sep 2026 | Symbols `×` rejected, `↺` changed | Amir's acceptance scenarios |
 | 29 Sep 2026 | Scroll sideways instead of cutting long text | Amir asked to read the full text |
+| 2 Oct 2026 | A Claude Code mod gives Claude the tools; Go stays the brain | Keeps the tested Go tree logic (section 18) |
+| 2 Oct 2026 | The Go view stays the screen; the mod draws no pane | Amir wants the tree in its own window |
 
 **The first plan** used a second AI to read the chat after every Claude reply.
 It ran through Codex CLI with `gpt-5.6-luna`. A test worked: 10 seconds and
@@ -814,3 +820,88 @@ Still to come: `[` `]` to step between sibling branches.
    passed live (`docs/findings.md` part 11).
 4. ~~The view: `⎇` stubs, provenance in the details panel, and the keys `b`,
    `B`, `enter`, `p`.~~ Done 29 Sep 2026 (17.3, 17.4).
+
+
+## 18. The Claude Code mod
+
+Claude Code can now load mods: plugins of small TypeScript hooks that run
+inside Claude Code itself. On 2 Oct 2026 Amir chose to move Claude's side of
+decision-tree into one, and keep everything else in Go. The mod lives in
+`mod/`. It replaces the MCP server; it does not replace the view.
+
+```
+  Claude calls record_decision
+            │
+            ▼
+  ┌────────────────────────────┐
+  │ the mod (inside Claude Code)│   knows the session id, the folder,
+  │ mod/hooks/register.ts       │   and the call's tool-use id
+  └─────────────┬──────────────┘
+                │  runs: decision-tree record --session … --cwd … --tool-use-id …
+                │        (the call as JSON on stdin)
+                ▼
+  ┌────────────────────────────┐
+  │ the Go program              │   the same tree logic and checkpoints
+  │ `decision-tree record`      │   as the MCP server; prints the reply
+  └─────────────┬──────────────┘
+                ▼
+     tree file ──▶ the Go view, as before
+```
+
+### 18.1 What the mod does
+
+| Hook | Does |
+|------|------|
+| `session.start` | Runs `decision-tree describe` and registers both tools from what it prints. If the program is missing, it shows a short message and adds nothing. |
+| `prompt.compose` | Adds the rules (section 6) to Claude's system prompt, where the MCP server's instructions went. Only once the tools exist. |
+| `tool.describe` | Keeps both tools in Claude's list, not behind ToolSearch. This is what `alwaysLoad` did. |
+| `tool.call` | Runs `decision-tree record` or `decision-tree show` and hands back what it prints. An error comes back as an error Claude can read, without the `decision-tree: ` start. |
+
+- **Same tool names.** A mod's tools are named `mcp__<mod>__<tool>`. The mod is
+  named `decision-tree`, so Claude still sees
+  `mcp__decision-tree__record_decision`, and the allow rules in
+  `~/.claude/settings.json` still match.
+- **One copy of the rules.** The rules and the tool descriptions stay in
+  `internal/server/server.go`. `describe` prints them, so the mod never keeps
+  a copy that could drift.
+- **No more looking up the session.** The mod asks Claude Code for the
+  session id and folder and passes them in. The MCP server had to read
+  `~/.claude/sessions/<pid>.json` for this.
+- **Option `binary`:** which `decision-tree` program to run. The default is
+  `decision-tree`, found on PATH.
+
+### 18.2 Tests
+
+- `go test`: `TestToolCommands` runs `record`, `show`, and `describe`,
+  including bad calls, and checks that a pick's checkpoint keeps the tool-use id.
+- `claude plugin test mod`: 6 tests with a fake Go program. Tools and rules
+  at session start, nothing when the program is missing, both tools kept in
+  front, `record` and `show` get the session, and an error reads cleanly.
+- Live, 2 Oct 2026: one headless Claude run with only the mod loaded (MCP
+  servers off) and Scenario 1's message. Claude logged the decision without
+  being asked and did not mention the tree. `print` drew the same tree as
+  Scenario 1, and `source` found the cut point and the git snapshot.
+
+### 18.3 Switching over (done 2 Oct 2026)
+
+The mod and the MCP server give Claude tools with the same names, so only one
+can be on at a time. The switch was three steps. A new session then listed
+both tools, from the mod:
+
+1. `make install`, so `~/.local/bin/decision-tree` has `record`, `show`, and
+   `describe`.
+2. Remove the MCP server: `claude mcp remove --scope user decision-tree`.
+3. Load the mod in every session: in `~/.claude/settings.json`, set
+   `"env": {"CLAUDE_CODE_PLUGIN_DIRS": "<this repo>/mod"}`.
+
+To go back: remove that line and add the MCP server again (section 10).
+
+### 18.4 What a mod could add later
+
+- Refuse calls from sub-agents. Each tool call now says whether a sub-agent
+  made it; the MCP server could not tell (section 13, row 5).
+- Note the cut point when the call is made. Claude Code tells a mod the id of
+  each chat entry as it saves it, so `internal/claude/cut.go` would no longer
+  need to read the chat file (risk 12.4).
+- The second guard from 12.1: after each turn, ask Claude, over the same
+  cached chat, whether a decision was made and not logged.

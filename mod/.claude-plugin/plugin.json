@@ -1,0 +1,14 @@
+{
+  "name": "decision-tree",
+  "version": "0.1.0",
+  "description": "Claude logs the project decisions of a session as a tree; the Go program saves it and draws it",
+  "author": { "name": "Amir Panahi" },
+  "userConfig": {
+    "binary": {
+      "type": "string",
+      "title": "decision-tree program",
+      "description": "The decision-tree program to run: a name on PATH, or a full path",
+      "default": "decision-tree"
+    }
+  }
+}
